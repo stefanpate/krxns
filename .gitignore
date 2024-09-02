@@ -3,6 +3,10 @@ config.yaml
 
 # Large files
 data/sprhea_240310_v3_mapped.json
+artifacts/sim_mats/*
+
+# Slurm stuff
+*.sh
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
