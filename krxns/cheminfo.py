@@ -1,8 +1,9 @@
 import rdkit
 from rdkit import Chem
-from rdkit.Chem import rdFMCS, rdFingerprintGenerator
+from rdkit.Chem import rdFMCS, rdFingerprintGenerator, BRICS
 from rdkit.Chem.MolStandardize import rdMolStandardize
-from itertools import product
+from itertools import product, chain
+import re
 import pandas
 import numpy as np
 from typing import Iterable
@@ -125,3 +126,78 @@ def mcs(mols: Iterable[rdkit.Chem.rdchem.Mol], norm: str = 'max', dtype=np.float
         full = res.numAtoms / max(m.GetNumAtoms() for m in mols)
 
     return dtype(full)
+
+def brics_assign(lhs: list[rdkit.Chem.rdchem.Mol], rhs: list[rdkit.Chem.rdchem.Mol]) -> np.ndarray:
+    '''
+    Determines which reactant-product pairs from a reaction share a 
+    molecular fragment unique to them and therefore must have transfered
+    this mass
+
+    Args
+    -----
+    lhs, rhs: list[rdkit.Chem.rdchem.Mol]
+        Reactants and products, respectively
+
+    Returns
+    --------
+    link_mat: ndarray
+        Binary matrix indicating unique fragment links
+    '''
+    def format_fragment(smi: str):
+        patt = r'\d+#\d+'
+        smarts = Chem.MolToSmarts(Chem.MolFromSmiles(smi))
+        smarts = re.sub(patt, '*', smarts)
+        return Chem.MolFromSmarts(smarts)
+
+    def decompose_and_format(mol: rdkit.Chem.rdchem.Mol):
+        frags = BRICS.BRICSDecompose(mol)
+        return [format_fragment(elt) for elt in frags]
+    
+    def find_fragment_intersection(
+            frags1: list[rdkit.Chem.rdchem.Mol],
+            frags2: list[rdkit.Chem.rdchem.Mol]
+        ) -> list[tuple[rdkit.Chem.rdchem.Mol]]:
+        '''
+        Fragments declared "intersecting" if they have the same number of atoms
+        and one SubstructMatches the other
+        '''
+        intersection = []
+        for f1, f2 in product(frags1, frags2):
+            if f1.GetNumAtoms() != f2.GetNumAtoms():
+                continue
+            
+            try:
+                if f1.HasSubstructMatch(f2) or f2.HasSubstructMatch(f1):
+                    intersection.append((f1, f2))
+            except:
+                continue
+
+        return intersection
+
+    left_idxs = [i for i in range(len(lhs))]
+    right_idxs = [i for i in range(len(rhs))]
+
+    left_frags = [decompose_and_format(elt) for elt in lhs]
+    right_frags = [decompose_and_format(elt) for elt in rhs]
+
+    link_mat = np.zeros(shape=(len(lhs), len(rhs)))
+    for i, j in product(left_idxs, right_idxs):
+        lf = left_frags[i]
+        rf = right_frags[j]
+        lf_complement = list(chain(*[left_frags[idx] for idx in left_idxs if idx != i]))
+        rf_complement = list(chain(*[right_frags[idx] for idx in right_idxs if idx != j]))
+
+        this_intersection = find_fragment_intersection(lf, rf) # All matching frag pairs for this rct-pdt pair
+        if not this_intersection:
+            continue
+        
+        # Check that the match is unique, i.e., this rct and pdt could only have gotten frag
+        # from the other, and not from any other pdts or rcts, respectively
+        for pair in this_intersection:
+            left_right_complement_intersection = find_fragment_intersection([pair[0]], rf_complement)
+            right_left_complement_intersection = find_fragment_intersection([pair[1]], lf_complement)
+
+        if not left_right_complement_intersection and not right_left_complement_intersection:
+            link_mat[i, j] = 1
+
+    return link_mat
