@@ -16,6 +16,7 @@ pathlib = "^1.0.1"
 tqdm = "^4.66.5"
 numpy = "<2.0"
 rdkit = "2024.3.2"
+ipywidgets = "^8.1.5"
 
 
 [build-system]
