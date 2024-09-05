@@ -30,7 +30,6 @@ def main():
         rids.add(tuple(sorted([k, v['reverse']])))
 
     keepers = [elt[0] for elt in rids]
-
     known_reactions = {k: known_reactions[k] for k in keepers}
 
     # Load cofactors
@@ -51,8 +50,8 @@ def main():
 
     for rid, rxn in tqdm(known_reactions.items()):
         lhs, rhs = [set(side.split(".")) for side in rxn['smarts'].split(">>")] # Set out stoichiometric degeneracy
-        lhs = [elt for elt in lhs if elt not in cofactors]
-        rhs = [elt for elt in rhs if elt not in cofactors]
+        lhs = sorted([elt for elt in lhs if elt not in cofactors])
+        rhs = sorted([elt for elt in rhs if elt not in cofactors])
 
         if not lhs or not rhs:
             continue
@@ -66,10 +65,9 @@ def main():
         rmols = [Chem.MolFromSmiles(elt) for elt in rhs]
 
         left_ids, right_ids = np.array([smi2id[smi] for smi in lhs]), np.array([smi2id[smi] for smi in rhs])
-        left_names, right_names = [known_compounds[id]['name'] for id in left_ids], [known_compounds[id]['name'] for id in right_ids]
         
         bm = brics_assign(lmols, rmols)
-        df = pd.DataFrame(data=bm, columns=right_names, index=left_names)
+        df = pd.DataFrame(data=bm, columns=right_ids, index=left_ids)
         df.to_csv(brics_sim_mats_filepath / f"{rid}.csv", sep='\t')
         
 if __name__ == '__main__':
