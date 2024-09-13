@@ -2,7 +2,7 @@ import json
 from itertools import chain
 import multiprocessing as mp
 from krxns.cheminfo import MorganFingerPrinter, tanimoto_similarity, mcs
-from krxns.config import sim_mats_filepath, data_filepath
+from krxns.config import filepaths
 from rdkit import Chem
 import numpy as np
 from tqdm import tqdm
@@ -13,7 +13,7 @@ if __name__ == '__main__':
     chunksize = 50
 
     # Load known reaction data
-    with open(data_filepath / rxns_fn, 'r') as f:
+    with open(filepaths['data'] / rxns_fn, 'r') as f:
         known_reactions = json.load(f)
 
     known_reactions = {int(k): v for k,v in known_reactions.items()}
@@ -76,4 +76,4 @@ if __name__ == '__main__':
         sm[j, i] = elts
 
     for k, sm in sim_mats.items():
-        np.save(sim_mats_filepath / k, sm)
+        np.save(filepaths['artifacts_sim_mats'] / k, sm)
