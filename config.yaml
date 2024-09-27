@@ -1,9 +1,0 @@
-dirs:
-  artifacts: "/home/stef/krxns/artifacts"
-  data: "/home/stef/krxns/data"
-
-subdirs:
-  artifacts:
-    - "sim_mats"
-  data:
-    - "cofactors"
