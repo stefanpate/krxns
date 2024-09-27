@@ -1,3 +1,6 @@
+# Configs
+config.yaml
+
 # Large files
 data/sprhea_240310_v3_mapped.json
 artifacts/sim_mats/*

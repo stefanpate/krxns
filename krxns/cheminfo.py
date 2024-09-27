@@ -1,6 +1,6 @@
 import rdkit
 from rdkit import Chem
-from rdkit.Chem import rdFMCS, rdFingerprintGenerator, BRICS, Draw, Mol
+from rdkit.Chem import rdFMCS, rdFingerprintGenerator, BRICS, Draw, Mol, AllChem
 from rdkit.Chem.MolStandardize import rdMolStandardize
 from rdkit.Chem.rdChemReactions import ChemicalReaction
 from itertools import product, chain
@@ -9,13 +9,13 @@ import pandas
 import numpy as np
 from typing import Iterable
 
-def draw_molecule(mol: str | ChemicalReaction, size: tuple = (200, 200), use_svg: bool = True):
+def draw_molecule(mol: str | Mol, size: tuple = (200, 200), use_svg: bool = True):
     '''
     Draw molecule.
 
     Args
     ----
-    mol:str | rdkit.Chem.ChemicalReaction
+    mol:str | Mol
         Molecule
     size:tuple
         (width, height)
@@ -34,14 +34,13 @@ def draw_molecule(mol: str | ChemicalReaction, size: tuple = (200, 200), use_svg
 
     return img
 
-def draw_reaction(rxn: str | Mol, sub_img_size: tuple = (200, 200), use_svg: bool = True, use_smiles: bool = True):
+def draw_reaction(rxn: str | ChemicalReaction, sub_img_size: tuple = (200, 200), use_svg: bool = True, use_smiles: bool = True):
     '''
     Draw reaction.
 
     Args
     ----
-    rxn:str
-        SMARTS-encoded reaction
+    rxn:str | ChemicalReaction
     sub_img_size:tuple
         Substrate img size
     use_svg:bool
@@ -245,3 +244,89 @@ def brics_assign(lhs: list[rdkit.Chem.rdchem.Mol], rhs: list[rdkit.Chem.rdchem.M
             link_mat[i, j] = 1
 
     return link_mat
+
+def post_standardize(mol, do_canon_taut):
+    '''
+    Standardize molecules after generating them with an operator in rdkit
+        - Skip neutralization because assume operators only affect heavy atoms, not hydrogens and therefore
+        protonation states
+        - Skip find parent because assume I am not producing salts / fragments (TODO: pressure test this
+        assumption)
+    -
+    '''
+    do_neutralize = False
+    do_find_parent = False
+    
+    return Chem.MolToSmiles(standardize_mol(mol, do_canon_taut=do_canon_taut, do_neutralize=do_neutralize, do_find_parent=do_find_parent))
+
+def standardize_mol(mol, **kwargs):
+    kwargs = _handle_kwargs(**kwargs)
+
+    if kwargs['do_remove_stereo']:
+        Chem.rdmolops.RemoveStereochemistry(mol)
+
+    # removeHs, disconnect metal atoms, normalize the molecule, reionize the molecule
+    # Also checks valency, that mol is kekulizable
+    mol = rdMolStandardize.Cleanup(mol)
+
+    # if many fragments, get the "parent" (the actual mol we are interested in)
+    if kwargs['do_find_parent']:
+        mol = rdMolStandardize.FragmentParent(mol)
+
+    if kwargs['do_neutralize']:
+        mol = neutralize_charges(mol) # Remove charges on atoms matching common patterns
+
+    # Enumerate tautomers and choose canonical one
+    if kwargs['do_canon_taut']:
+        te = rdMolStandardize.TautomerEnumerator()
+        te.SetMaxTautomers(kwargs['max_tautomers'])
+        mol = te.Canonicalize(mol)
+    
+    return mol
+
+def _handle_kwargs(**kwargs):
+    default_kwargs = {
+        'do_canon_taut':False,
+        'do_neutralize':True,
+        'do_find_parent':True,
+        'do_remove_stereo':True,
+        'max_tautomers':1000,
+    }
+    filtered_kwargs = {k : v for k, v in kwargs.items() if k in default_kwargs}
+    default_kwargs.update(filtered_kwargs)
+    return default_kwargs
+
+def neutralize_charges(mol: Chem.rdchem.Mol) -> Chem.rdchem.Mol:
+    """Neutralize all charges in an rdkit mol.
+
+    Parameters
+    ----------
+    mol : rdkit.Chem.rdchem.Mol
+        Molecule to neutralize.
+
+    Returns
+    -------
+    mol : rdkit.Chem.rdchem.Mol
+        Neutralized molecule.
+    """
+    patts = (
+        ("[n+;H]", "n"), # Imidazoles
+        ("[N+;!H0]", "N"), # Amines
+        ("[$([O-]);!$([O-][#7])]", "O"), # Carboxylic acids and alcohols
+        ("[S-;X1]", "S"), # Thiols
+        ("[$([N-;X2]S(=O)=O)]", "N"), # Sulfonamides
+        ("[$([N-;X2][C,N]=C)]", "N"), # Enamines
+        ("[n-]", "[nH]"), # Tetrazoles
+        ("[$([S-]=O)]", "S"), # Sulfoxides
+        ("[$([N-]C=O)]", "N"), # Amides
+    )
+
+    reactions = [
+        (AllChem.MolFromSmarts(x), AllChem.MolFromSmiles(y, False)) for x,y in patts
+    ]
+
+    for (reactant, product) in reactions:
+        while mol.HasSubstructMatch(reactant):
+            rms = AllChem.ReplaceSubstructs(mol, reactant, product)
+            mol = rms[0]
+    return mol

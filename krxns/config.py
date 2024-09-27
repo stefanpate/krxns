@@ -11,5 +11,9 @@ for k, v in configs['dirs'].items():
     filepaths[k] = Path(v)
     if k in configs['subdirs']:
         for subdir in configs['subdirs'][k]:
-            sub_k = f"{k}_{subdir}"
+            
+            if subdir == k:
+                raise ValueError(f"Keys for dirs and subdirs should not be the same to avoid conflicts. Please rename {subdir}")
+
+            sub_k = f"{subdir}"
             filepaths[sub_k] = filepaths[k] / subdir
