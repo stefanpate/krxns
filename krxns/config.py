@@ -9,3 +9,4 @@ with open(project_dir / "config.yaml", 'r') as f:
 sim_mats_filepath = Path(configs["FILEPATHS"]['sim_mats'])
 cofactors_filepath = Path(configs["FILEPATHS"]['cofactors'])
 data_filepath = Path(configs["FILEPATHS"]['data'])
+brics_sim_mats_filepath = Path(configs["FILEPATHS"]['brics_sim_mats'])
