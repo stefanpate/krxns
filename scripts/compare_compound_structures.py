@@ -27,7 +27,6 @@ if __name__ == '__main__':
 
     known_compounds = {i: {'smiles': k, 'name': v} for i, (k, v) in enumerate(known_compounds.items())}
     smi2id = {v['smiles']: k for k,v in known_compounds.items()}
-    # known_compounds = {i: known_compounds[i] for i in range(20)} # DOWNSAMPLE
     n = len(known_compounds)
 
     # Construct sim mats based on molecular structure
