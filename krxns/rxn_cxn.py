@@ -93,23 +93,11 @@ class SimilarityConnector:
         include_paired_cofactors: Iterable[tuple]
         '''
         self.reactions = reactions
-        self.cofactors = cofactors # TODO: extract ids
+        self.cofactors = cofactors
         self.cc_sim_mats = cc_sim_mats
-        self.smi2id, self.compounds = self._make_smi2id(reactions)
+        self.compounds, self.smi2id  = extract_compounds(reactions)
         self.cc_sim_mats['jaccard'] = self._construct_rxn_co_occurence_jaccard()
         self.paired_cofactors = self._make_paired_cofactors(k_paired_cofactors, n_rxns_lb, include_paired_cofactors)
-
-    def _make_smi2id(self, reactions):
-        compounds = {}
-        for elt in reactions.values():
-            subs = chain(*[side.split(".") for side in elt['smarts'].split(">>")])
-            for sub in subs:
-                name = elt['smi2name'][sub]
-                compounds[sub] =  name if name else ''
-
-        compounds = {i: {'smiles': k, 'name': v} for i, (k, v) in enumerate(compounds.items())}
-        smi2id = {v['smiles']: k for k, v in compounds.items()}
-        return smi2id, compounds
     
     def _construct_rxn_co_occurence_jaccard(self):
         cpd_corr = np.zeros(shape=(len(self.compounds), len(self.compounds)))
@@ -248,7 +236,36 @@ class SimilarityConnector:
         midx = np.argmin(H)
         return candidates[np.argmax(sim[:, midx])]
 
+def extract_compounds(reactions: dict):
+        '''
+        Extracts compounds from reaction dict.
 
+        Args
+        ----
+        reactions: dict
+            Reaciton id -> {'smarts': , }
+
+        Returns
+        -------
+        compounds:dict
+            ID, i.e., row / col idx in compound x compound similarity matrix -> smiles and names
+        smi2id:dict
+            Smiles -> cxc similarity matrix
+        '''
+        tmp = {}
+        for elt in reactions.values():
+            smis = chain(*[side.split(".") for side in elt['smarts'].split(">>")])
+            for smi in smis:
+                name = elt['smi2name'][smi]
+                tmp[smi] =  name if name else ''
+
+        compounds = {}
+        smi2id = {}
+        for i, smi in enumerate(sorted(tmp.keys())): # Lexicographical sort of keys will be order of smi2id
+            compounds[i] = {'smiles': smi, 'name': tmp[smi]}
+            smi2id[smi] = i
+        
+        return compounds, smi2id
     
 def align_outputs_w_products(outputs: tuple[tuple[Mol]], products: list[str]):
     output_idxs = [i for i in range(len(products))]

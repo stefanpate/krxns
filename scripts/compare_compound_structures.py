@@ -3,12 +3,14 @@ from itertools import chain
 import multiprocessing as mp
 from krxns.cheminfo import MorganFingerPrinter, tanimoto_similarity, mcs
 from krxns.config import filepaths
+from krxns.rxn_cxn import extract_compounds
 from rdkit import Chem
 import numpy as np
 from tqdm import tqdm
 
 if __name__ == '__main__':
-    dt = np.float16
+    # Set these
+    dt = np.float32
     rxns_fn ="sprhea_240310_v3_mapped.json"
     chunksize = 50
 
@@ -17,16 +19,7 @@ if __name__ == '__main__':
         known_reactions = json.load(f)
 
     known_reactions = {int(k): v for k,v in known_reactions.items()}
-
-    # Extract known compounds
-    known_compounds = {}
-    for elt in known_reactions.values():
-        subs = chain(*[side.split(".") for side in elt['smarts'].split(">>")])
-        for sub in subs:
-            known_compounds[sub] = elt['smi2name'].get(sub, None)
-
-    known_compounds = {i: {'smiles': k, 'name': v} for i, (k, v) in enumerate(known_compounds.items())}
-    smi2id = {v['smiles']: k for k,v in known_compounds.items()}
+    known_compounds, smi2id = extract_compounds(known_reactions) # Extract known compounds
     n = len(known_compounds)
 
     # Construct sim mats based on molecular structure
@@ -66,7 +59,6 @@ if __name__ == '__main__':
 
     with mp.Pool() as pool:
         res = list(tqdm(pool.imap(pool_fcn, mol_pair_generator(known_compounds), chunksize=chunksize), total=int((n**2 - n) / 2)))
-
 
     i, j = [np.array(elt) for elt in zip(*sim_mat_idx_generator(known_compounds))]
     for k, sm in sim_mats.items():

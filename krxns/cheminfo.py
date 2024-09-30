@@ -290,7 +290,7 @@ def _handle_kwargs(**kwargs):
         'do_neutralize':True,
         'do_find_parent':True,
         'do_remove_stereo':True,
-        'max_tautomers':1000,
+        'max_tautomers':50,
     }
     filtered_kwargs = {k : v for k, v in kwargs.items() if k in default_kwargs}
     default_kwargs.update(filtered_kwargs)
