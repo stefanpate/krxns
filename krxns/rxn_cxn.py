@@ -6,6 +6,8 @@ from collections import defaultdict
 from typing import Iterable
 import numpy as np
 from scipy.stats import entropy
+import pandas as pd
+from tqdm import tqdm
 
 def connect_reaction_w_operator(reaction: str, operator: str, atom_map_to_rct_idx: dict) -> dict:
     '''
@@ -42,7 +44,7 @@ def connect_reaction_w_operator(reaction: str, operator: str, atom_map_to_rct_id
     outputs = operator.RunReactants(rcts, maxProducts=10_000) # Apply operator
     aligned_output = align_outputs_w_products(outputs, pdts)
     if not aligned_output:
-        return None
+        return {}, {}
     
     # Tally up which atoms from where
     pdt_inlinks = {pdt_idx: {rct_idx: 0 for rct_idx in range(len(rcts))} for pdt_idx in range(len(pdts))} # {pdt_idx: {rct_idx: n_atoms_from}, }
@@ -72,7 +74,7 @@ def connect_reaction_w_operator(reaction: str, operator: str, atom_map_to_rct_id
 
 class SimilarityConnector:
     def __init__(
-            self, reactions: dict,
+            self, reactions: dict[int, dict],
             cc_sim_mats: dict[str, np.ndarray],
             cofactors: dict[str, str],
             k_paired_cofactors: int = 21,
@@ -82,7 +84,7 @@ class SimilarityConnector:
         '''
         Args
         -----
-        self, reactions: dict
+        self, reactions: dict[int, dict]
         cc_sim_mats: dict[str, np.ndarray]
             Compound-compound similarity matrices. Indices assumed
             to be order of appearance in reactions TODO: Change this assumption. Too tenuous
@@ -113,7 +115,9 @@ class SimilarityConnector:
             
         row_sum = cpd_corr.sum(axis=1).reshape(-1, 1)
         col_sum = cpd_corr.sum(axis=0).reshape(1, -1)
-        return cpd_corr / (row_sum + col_sum - cpd_corr) # Jaccard co-occurence-in-rxn index. Symmetric
+        cpd_corr = np.where((row_sum + col_sum - cpd_corr) != 0, cpd_corr / (row_sum + col_sum - cpd_corr), 0) # Jaccard co-occurence-in-rxn index. Symmetric
+
+        return cpd_corr
 
     def _make_paired_cofactors(self, k_paired_cofactors, n_rxns_lb, include_paired_cofactors):
         id2jaccard = {}
@@ -157,6 +161,10 @@ class SimilarityConnector:
         rct_ids = set([self.smi2id[smi] for smi in rcts if smi not in self.cofactors])
         pdt_ids = set([self.smi2id[smi] for smi in pdts if smi not in self.cofactors])
 
+        # No substrates on either side after removing unpaired cofactors
+        if len(rct_ids) == 0 or len(pdt_ids) == 0:
+            return {}, {}, [len(rct_ids), len(pdt_ids)]
+
         # Initialize inlinks w/ all but unpaired cofactors
         pdt_inlinks = {pdt_id: {rct_id: 0 for rct_id in rct_ids} for pdt_id in pdt_ids}
         rct_inlinks = {rct_id: {pdt_id: 0 for pdt_id in pdt_ids} for rct_id in rct_ids}
@@ -176,6 +184,7 @@ class SimilarityConnector:
         if to_remove:
             rct_id, pdt_id = to_remove
             
+            # Connect
             pdt_inlinks[pdt_id][rct_id] = 1
             rct_inlinks[rct_id][pdt_id] = 1
 
@@ -183,16 +192,18 @@ class SimilarityConnector:
             rct_ids.remove(rct_id)
             pdt_ids.remove(pdt_id)
 
-        if len(rct_ids) == 0 and len(pdt_ids) == 0: # Done after paired cofactors
-            return rct_inlinks, pdt_inlinks
-        elif len(rct_ids) == 0 and not len(pdt_ids) == 0: # Remaining pdts must connect lone rct paired cof
+        nr_np = [len(rct_ids), len(pdt_ids)]
+
+        if nr_np[0] == 0 and nr_np[1] == 0: # Done after paired cofactors
+            return rct_inlinks, pdt_inlinks, sorted(nr_np)
+        elif nr_np[0] == 0 and not nr_np[1] == 0: # Remaining pdts must connect lone rct paired cof
             for rem_id in pdt_ids:
                 pdt_inlinks[rem_id][rct_id] = 1
-            return rct_inlinks, pdt_inlinks
-        elif not len(rct_ids) == 0 and len(pdt_ids) == 0: # Remaining rcts must connect lone pdt paired cof
+            return rct_inlinks, pdt_inlinks, sorted(nr_np)
+        elif not nr_np[0] == 0 and nr_np[1] == 0: # Remaining rcts must connect lone pdt paired cof
             for rem_id in rct_ids:
                 rct_inlinks[rem_id][pdt_id] = 1
-            return rct_inlinks, pdt_inlinks
+            return rct_inlinks, pdt_inlinks, sorted(nr_np)
         
         # Construct reaction similarity matrix
         i, j = zip(*product(rct_ids, pdt_ids))
@@ -213,7 +224,19 @@ class SimilarityConnector:
             partner = self._get_partner(sim, rct_ids)
             pdt_inlinks[pdt_id][partner] = 1
         
-        return rct_inlinks, pdt_inlinks
+        return rct_inlinks, pdt_inlinks, sorted(nr_np)
+    
+    def connect_reactions(self):
+        results = {}
+        side_counts = {}
+        for rid in tqdm(self.reactions.keys()):
+            results[rid] = {}
+            rct_inlinks, pdt_inlinks, nr_np = self.connect_reaction(rid)
+            results[rid]['rct_inlinks'] = rct_inlinks
+            results[rid]['pdt_inlinks'] = pdt_inlinks
+            side_counts[rid] = nr_np
+
+        return results, side_counts
 
     def _get_partner(self, sim:np.ndarray, candidates:list):
         '''
@@ -266,7 +289,28 @@ def extract_compounds(reactions: dict):
             smi2id[smi] = i
         
         return compounds, smi2id
+
+
+def construct_op_atom_map_to_rct_idx(ops: pd.DataFrame) -> dict:
+    '''
+    Returns dict mapping atom map number ot reactant idx on LHS
+    of provided reaction operators
+    '''
+    op_atom_map_to_rct_idx = {}
+    for op_name, row in ops.iterrows():
+
+        atom_map_to_rct_idx = {}
+        rxn = AllChem.ReactionFromSmarts(row["SMARTS"])
+        for ri in range(rxn.GetNumReactantTemplates()):
+            rt = rxn.GetReactantTemplate(ri)
+            for atom in rt.GetAtoms():
+                if atom.GetAtomMapNum():
+                    atom_map_to_rct_idx[atom.GetAtomMapNum()] = ri
+
+        op_atom_map_to_rct_idx[op_name] = atom_map_to_rct_idx
     
+    return op_atom_map_to_rct_idx
+        
 def align_outputs_w_products(outputs: tuple[tuple[Mol]], products: list[str]):
     output_idxs = [i for i in range(len(products))]
 

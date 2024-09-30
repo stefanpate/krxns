@@ -5,7 +5,18 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python Debugger: Current File",
+            "name": "args",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": [
+                "sim-connect",
+                "sprhea_240310_v3_mapped.json"
+            ]
+        },
+        {
+            "name": "pydebug",
             "type": "debugpy",
             "request": "launch",
             "program": "${file}",
