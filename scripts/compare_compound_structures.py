@@ -67,4 +67,4 @@ if __name__ == '__main__':
         sm[j, i] = elts
 
     for k, sm in sim_mats.items():
-        np.save(filepaths['artifacts_sim_mats'] / k, sm)
+        np.save(filepaths['sim_mats'] / k, sm)

@@ -6,7 +6,7 @@ data/sprhea_240310_v3_mapped.json
 artifacts/sim_mats/*
 
 # Slurm stuff
-*.sh
+submit.sh
 
 # Logs
 **/logs
