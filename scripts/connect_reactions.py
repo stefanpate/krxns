@@ -1,7 +1,7 @@
 from argparse import ArgumentParser
 from krxns.cheminfo import expand_unpaired_cofactors
 from krxns.config import filepaths
-from krxns.rxn_cxn import connect_reaction_w_operator, SimilarityConnector, construct_op_atom_map_to_rct_idx
+from krxns.net_construction import connect_reaction_w_operator, SimilarityConnector, construct_op_atom_map_to_rct_idx
 import json
 import pandas as pd
 import numpy as np
@@ -57,7 +57,6 @@ def _similarity(args):
     unpaired_fp = filepaths['cofactors'] / "unpaired_cofactors_reference.tsv"
     name_blacklist = [
         'acetyl-CoA',
-        'CoA'
     ]
 
     unpaired_ref = pd.read_csv(

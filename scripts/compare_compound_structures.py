@@ -1,9 +1,8 @@
 import json
-from itertools import chain
 import multiprocessing as mp
 from krxns.cheminfo import MorganFingerPrinter, tanimoto_similarity, mcs
 from krxns.config import filepaths
-from krxns.rxn_cxn import extract_compounds
+from krxns.net_construction import extract_compounds
 from rdkit import Chem
 import numpy as np
 from tqdm import tqdm
