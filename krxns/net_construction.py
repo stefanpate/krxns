@@ -16,7 +16,6 @@ def construct_reaction_network(
         similarity_connections:dict[int, dict] = {},
         side_counts:dict[int, list] = {},
         connect_nontrivial: bool = False,
-        mass_threshold: float = None
     ):
     '''
     Args
@@ -29,28 +28,61 @@ def construct_reaction_network(
     node_list:list[tuple]
         Entries are (id:int, properties:dict)
     '''
+    fix_op_w_sim = [10540, 15237] # Known problems w/ operator-reaction mapping
     include_edge_props = ('smarts', 'rhea_ids', 'imt_rules')
+    direction_from_side = lambda side : 0 if side == 'rct_inlinks' else 1 if side == 'pdt_inlinks' else print("Error side key not found")
 
     reactions = fold_reactions(reactions)
     compounds, smi2id = extract_compounds(reactions)
     
     edge_list = []
+
+    # Add from operator_connections
     for rid, rules in operator_connections.items():
+
+        if rid in fix_op_w_sim:
+            continue
+        
         smiles = [elt.split('.') for elt in reactions[rid]['smarts'].split('>>')]
+
+        # Remove unpaired cofactors
         filtered_rules = defaultdict(lambda : defaultdict(dict))
         for rule, sides in rules.items():
-            for direction, (side, adj_mat) in enumerate(sides.items()):
+            for side, adj_mat in sides.items():
+                direction = direction_from_side(side)
                 adj_mat = remove_cofactors(adj_mat, direction, smiles, cofactors)
                 filtered_rules[rule][side] = adj_mat
 
-        sel_adj_mats = handle_multiple_rules(filtered_rules)
+        sel_adj_mats = handle_multiple_rules(filtered_rules) # Resolve cases with multiple rules
 
-        for direction, (side, adj_mat) in enumerate(sel_adj_mats.items()):
+        for side, adj_mat in sel_adj_mats.items():
+            direction = direction_from_side(side)
             adj_mat = translate_operator_adj_mat(adj_mat, direction, smiles, smi2id)
             edge_props = { **{'rid': rid}, **{prop: reactions[rid][prop] for prop in include_edge_props} }
+
+            if direction == 0:
+                edge_props['smarts'] = ">>".join(edge_props['smarts'].split(">>")[::-1])
+
             edge_list += nested_adj_mat_to_edge_list(adj_mat, edge_props)
 
-    # TODO: Connect similarity connections w/ ability to do different modes
+    
+    if similarity_connections and side_counts:
+        if connect_nontrivial:
+            sim_rids = list(similarity_connections.keys())
+        else:
+            sim_rids = [rid for rid in similarity_connections if 1 in side_counts[rid] and not 0 in side_counts[rid]]
+        
+        sim_rids += fix_op_w_sim # Patch
+
+        # Add from similarity connections
+        for rid in sim_rids:
+            for side, adj_mat in similarity_connections[rid].items():
+                direction = direction_from_side(side)
+                edge_props = { **{'rid': rid}, **{prop: reactions[rid][prop] for prop in include_edge_props} }
+                if direction == 0:
+                    edge_props['smarts'] = ">>".join(edge_props['smarts'].split(">>")[::-1])
+
+                edge_list += nested_adj_mat_to_edge_list([adj_mat], edge_props)
 
     # Assemble node list
     node_ids = set()
@@ -161,7 +193,7 @@ def translate_operator_adj_mat(adj_mat: dict[int: dict[int, float]], direction: 
 
     has_repeats = lambda x : any([len(v) > 1 for v in x.values()])
     if not has_repeats(id2i) and not has_repeats(id2j):
-        return {i2id[i]: {j2id[j]: weight for j, weight in inner.items()} for i, inner in adj_mat.items()}
+        return [{i2id[i]: {j2id[j]: weight for j, weight in inner.items()} for i, inner in adj_mat.items()}]
     else:
         expanded_adj_mat = []
         for i_combo in product(*id2i.values()):
@@ -171,10 +203,7 @@ def translate_operator_adj_mat(adj_mat: dict[int: dict[int, float]], direction: 
         
         return expanded_adj_mat
 
-def nested_adj_mat_to_edge_list(adj_mat: dict[int: dict[int, float]] | list[dict[int: dict[int, float]]], edge_props:dict) -> list[tuple]:
-    if type(adj_mat) is dict:
-        adj_mat = [adj_mat]
-
+def nested_adj_mat_to_edge_list(adj_mat: list[dict[int: dict[int, float]]], edge_props:dict) -> list[tuple]:
     iids = adj_mat[0].keys()
     inlinks = {i: {'from': -1, 'weight': -1} for i in iids}
     for elt in adj_mat:
@@ -590,4 +619,18 @@ if __name__ == '__main__':
     with open(filepaths['connected_reactions'] / 'sprhea_240310_v3_mapped_operator.json', 'r') as f:
         op_cxns = str2int(json.load(f))
 
-    construct_reaction_network(operator_connections=op_cxns, reactions=krs, cofactors=cofactors)
+    # Load sim connected reactions
+    with open(filepaths['connected_reactions'] / 'sprhea_240310_v3_mapped_similarity.json', 'r') as f:
+        sim_cxn = str2int(json.load(f))
+
+    with open(filepaths['connected_reactions'] / 'sprhea_240310_v3_mapped_side_counts.json', 'r') as f:
+        side_counts = str2int(json.load(f))
+
+    construct_reaction_network(
+        operator_connections=op_cxns,
+        similarity_connections=sim_cxn,
+        side_counts=side_counts,
+        reactions=krs,
+        cofactors=cofactors,
+        connect_nontrivial=True
+    )
