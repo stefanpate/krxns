@@ -284,6 +284,15 @@ def standardize_mol(mol, **kwargs):
     
     return mol
 
+def standardize_smiles(smiles, **kwargs):
+    kwargs = _handle_kwargs(**kwargs)
+    mol = Chem.MolFromSmiles(smiles)
+    mol = standardize_mol(
+        mol,
+        **kwargs
+    )
+    return Chem.MolToSmiles(mol)
+
 def _handle_kwargs(**kwargs):
     default_kwargs = {
         'do_canon_taut':False,

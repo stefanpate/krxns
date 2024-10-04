@@ -14,30 +14,59 @@ def construct_reaction_network(
         reactions: dict[int, dict],
         cofactors: Iterable[str],
         similarity_connections:dict[int, dict] = {},
+        side_counts:dict[int, list] = {},
         connect_nontrivial: bool = False,
         mass_threshold: float = None
     ):
+    '''
+    Args
+    -------
+
+    Returns
+    ---------
+    edge_list:list[tuple]
+        Entries are (from:int, to:int, properties:dict)
+    node_list:list[tuple]
+        Entries are (id:int, properties:dict)
+    '''
+    include_edge_props = ('smarts', 'rhea_ids', 'imt_rules')
+
     reactions = fold_reactions(reactions)
-    _, smi2id = extract_compounds(reactions)
+    compounds, smi2id = extract_compounds(reactions)
     
+    edge_list = []
     for rid, rules in operator_connections.items():
         smiles = [elt.split('.') for elt in reactions[rid]['smarts'].split('>>')]
         filtered_rules = defaultdict(lambda : defaultdict(dict))
         for rule, sides in rules.items():
             for direction, (side, adj_mat) in enumerate(sides.items()):
-                adj_mat = remove_cofactors(adj_mat, direction, smiles, cofactors, smi2id)
+                adj_mat = remove_cofactors(adj_mat, direction, smiles, cofactors)
                 filtered_rules[rule][side] = adj_mat
 
         sel_adj_mats = handle_multiple_rules(filtered_rules)
 
         for direction, (side, adj_mat) in enumerate(sel_adj_mats.items()):
             adj_mat = translate_operator_adj_mat(adj_mat, direction, smiles, smi2id)
-            edge_list = nested_adj_mat_to_edge_list(adj_mat)
+            edge_props = { **{'rid': rid}, **{prop: reactions[rid][prop] for prop in include_edge_props} }
+            edge_list += nested_adj_mat_to_edge_list(adj_mat, edge_props)
 
     # TODO: Connect similarity connections w/ ability to do different modes
+
+    # Assemble node list
+    node_ids = set()
+    for elt in edge_list:
+        for i in range(2):
+            node_ids.add(elt[i])
+
+    node_list = []
+    for id in node_ids:
+        node_props = compounds[id]
+        node_list.append((id, node_props))
+
+    return edge_list, node_list
         
 
-def remove_cofactors(adj_mat: dict[int, dict[int, float]], direction: int, smiles: list[str], cofactors: Iterable[str], smi2id: dict[str, int]):
+def remove_cofactors(adj_mat: dict[int, dict[int, float]], direction: int, smiles: list[str], cofactors: Iterable[str]):
     tmp = defaultdict(lambda : defaultdict(float))
     for i, inner in adj_mat.items():
         ismi = smiles[direction ^ 0][i]
@@ -142,7 +171,7 @@ def translate_operator_adj_mat(adj_mat: dict[int: dict[int, float]], direction: 
         
         return expanded_adj_mat
 
-def nested_adj_mat_to_edge_list(adj_mat: dict[int: dict[int, float]] | list[dict[int: dict[int, float]]]) -> list[tuple]:
+def nested_adj_mat_to_edge_list(adj_mat: dict[int: dict[int, float]] | list[dict[int: dict[int, float]]], edge_props:dict) -> list[tuple]:
     if type(adj_mat) is dict:
         adj_mat = [adj_mat]
 
@@ -155,7 +184,15 @@ def nested_adj_mat_to_edge_list(adj_mat: dict[int: dict[int, float]] | list[dict
                 inlinks[i]['from'] = neighbor
                 inlinks[i]['weight'] = weight
 
-    return [(i, inlinks[i]['from'], {'weight':inlinks[i]['weight']}) for i in inlinks if inlinks[i]['from'] != -1]
+    # Note: returns as (from, to, props) because this is what networkx add_edges_from() expects
+    edge_list = []
+    for i in inlinks:
+        if inlinks[i]['from'] != -1:
+            j = inlinks[i]['from']
+            props = { **edge_props, **{'weight':inlinks[i]['weight']} }
+            edge_list.append((j, i, props))
+
+    return edge_list
 
 def connect_reaction_w_operator(reaction: str, operator: str, atom_map_to_rct_idx: dict) -> dict:
     '''
