@@ -2,7 +2,7 @@ from rdkit import Chem
 from rdkit.Chem import AllChem, Mol
 from krxns.cheminfo import post_standardize
 from itertools import permutations, chain, product
-from collections import defaultdict
+from collections import defaultdict, Counter
 from typing import Iterable
 import numpy as np
 from scipy.stats import entropy
@@ -63,7 +63,7 @@ def construct_reaction_network(
             if direction == 0:
                 edge_props['smarts'] = ">>".join(edge_props['smarts'].split(">>")[::-1])
 
-            edge_list += nested_adj_mat_to_edge_list(adj_mat, edge_props)
+            edge_list += nested_adj_mat_to_edge_list(adj_mat, edge_props, smi2id)
 
     
     if similarity_connections and side_counts:
@@ -82,7 +82,7 @@ def construct_reaction_network(
                 if direction == 0:
                     edge_props['smarts'] = ">>".join(edge_props['smarts'].split(">>")[::-1])
 
-                edge_list += nested_adj_mat_to_edge_list([adj_mat], edge_props)
+                edge_list += nested_adj_mat_to_edge_list([adj_mat], edge_props, smi2id)
 
     # Assemble node list
     node_ids = set()
@@ -203,8 +203,11 @@ def translate_operator_adj_mat(adj_mat: dict[int: dict[int, float]], direction: 
         
         return expanded_adj_mat
 
-def nested_adj_mat_to_edge_list(adj_mat: list[dict[int: dict[int, float]]], edge_props:dict) -> list[tuple]:
+def nested_adj_mat_to_edge_list(adj_mat: list[dict[int: dict[int, float]]], edge_props:dict, smi2id:dict) -> list[tuple]:
+    rcts, pdts = [side.split(".") for side in edge_props["smarts"].split(">>")]
+    pull_other_subs = lambda x, exclude : dict(Counter([elt for elt in x if smi2id[elt] != exclude]))
     iids = adj_mat[0].keys()
+    
     inlinks = {i: {'from': -1, 'weight': -1} for i in iids}
     for elt in adj_mat:
         for i, inner in elt.items():
@@ -218,7 +221,9 @@ def nested_adj_mat_to_edge_list(adj_mat: list[dict[int: dict[int, float]]], edge
     for i in inlinks:
         if inlinks[i]['from'] != -1:
             j = inlinks[i]['from']
-            props = { **edge_props, **{'weight':inlinks[i]['weight']} }
+            requires = pull_other_subs(rcts, j)
+            other_products = pull_other_subs(pdts, i)
+            props = { **edge_props, **{'weight':inlinks[i]['weight'], "requires": requires, "other_products": other_products} }
             edge_list.append((j, i, props))
 
     return edge_list

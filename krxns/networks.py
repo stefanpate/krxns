@@ -1,5 +1,7 @@
 import networkx as nx
+from networkx.exception import NetworkXNoPath
 from typing import Any
+from copy import deepcopy
 
 class SuperMultiDiGraph(nx.MultiDiGraph):
     def __init__(self, incoming_graph_data=None, multigraph_input=None, **attr):
@@ -20,8 +22,24 @@ class SuperMultiDiGraph(nx.MultiDiGraph):
     def get_nodes_by_prop(self, prop:str, value:Any) -> list[int]:
         return [x for x, y in self.nodes(data=True) if y[prop] == value]
     
-    def get_edges_between(self, from_id:int, to_id:int, k:int = None):
+    def get_edges_between(self, source:int, target:int, k:int = None):
         if k:
-            return self.edges[from_id, to_id, k]
+            return self.edges[source, target, k]
         else:
-            return [self.edges[from_id, to_id, k] for k in self.ij2k[(from_id, to_id)]]
+            return [self.edges[source, target, k] for k in self.ij2k[(source, target)]]
+        
+    def shortest_path(self, source, target) -> list:
+        target_smiles = self.nodes[target]['smiles']
+        to_remove = [(i, j) for i, j, props in self.edges(data=True) if target_smiles in props['requires']]
+        pruned = deepcopy(self)
+        pruned.remove_edges_from(to_remove)
+        try:
+            node_path = nx.shortest_path(pruned, source, target)
+        except NetworkXNoPath as e:
+            return [], [] # No path found
+        
+        edge_path = []
+        for i in range(len(node_path) - 1):
+            edge_path.append(pruned.get_edges_between(node_path[i], node_path[i+1]))
+
+        return node_path, edge_path
