@@ -583,32 +583,11 @@ def align_outputs_w_products(outputs: tuple[tuple[Mol]], products: list[str]):
 if __name__ == '__main__':
     from krxns.config import filepaths
     from krxns.utils import str2int
-    from krxns.cheminfo import expand_unpaired_cofactors
     import json
 
-    # Load unpaired cofs
-    unpaired_fp = filepaths['cofactors'] / "unpaired_cofactors_reference.tsv"
-    name_blacklist = [
-        'acetyl-CoA',
-    ]
-
-    unpaired_ref = pd.read_csv(
-        filepath_or_buffer=unpaired_fp,
-        sep='\t'
-    )
-
-    filtered_unpaired = unpaired_ref.loc[~unpaired_ref['Name'].isin(name_blacklist), :]
-    cofactors = expand_unpaired_cofactors(filtered_unpaired, k=10)
-
-    manual = {
-        'N#N': 'N2',
-        '[H][H]': 'H2',
-        'S': 'hydrogen sufide',
-        '[Cl-]': 'chloride',
-        '[Na+]': 'sodium'
-    }
-
-    cofactors = {**cofactors, ** manual}
+    # Load unpaired cofactors
+    with open(filepaths['cofactors'] / '241008_unpaired_cofactors.json', 'r') as f:
+        cofactors = json.load(f)
 
     # Load cc sim mats
     cc_sim_mats = {

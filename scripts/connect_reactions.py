@@ -1,5 +1,4 @@
 from argparse import ArgumentParser
-from krxns.cheminfo import expand_unpaired_cofactors
 from krxns.config import filepaths
 from krxns.net_construction import connect_reaction_w_operator, SimilarityConnector, construct_op_atom_map_to_rct_idx
 import json
@@ -53,29 +52,9 @@ def _operator(args):
 def _similarity(args):
     known_reactions = _load_reactions(args.reactions)
 
-    # Load unpaired cofs
-    unpaired_fp = filepaths['cofactors'] / "unpaired_cofactors_reference.tsv"
-    name_blacklist = [
-        'acetyl-CoA',
-    ]
-
-    unpaired_ref = pd.read_csv(
-        filepath_or_buffer=unpaired_fp,
-        sep='\t'
-    )
-
-    filtered_unpaired = unpaired_ref.loc[~unpaired_ref['Name'].isin(name_blacklist), :]
-    cofactors = expand_unpaired_cofactors(filtered_unpaired, k=10)
-
-    manual = {
-        'N#N': 'N2',
-        '[H][H]': 'H2',
-        'S': 'hydrogen sufide',
-        '[Cl-]': 'chloride',
-        '[Na+]': 'sodium'
-    }
-
-    cofactors = {**cofactors, ** manual}
+    # Load unpaired cofactors
+    with open(filepaths['cofactors'] / '241008_unpaired_cofactors.json', 'r') as f:
+        cofactors = json.load(f)
 
     # Load cc sim mats
     cc_sim_mats = {

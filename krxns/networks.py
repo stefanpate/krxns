@@ -36,6 +36,7 @@ class SuperMultiDiGraph(nx.MultiDiGraph):
         try:
             node_path = nx.shortest_path(pruned, source, target)
         except NetworkXNoPath as e:
+            print(e)
             return [], [] # No path found
         
         edge_path = []
