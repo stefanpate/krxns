@@ -12,10 +12,13 @@ from tqdm import tqdm
 def construct_reaction_network(
         operator_connections: dict[int, dict],
         reactions: dict[int, dict],
-        cofactors: Iterable[str],
+        unpaired_cofactors: Iterable[str],
         similarity_connections:dict[int, dict] = {},
         side_counts:dict[int, list] = {},
         connect_nontrivial: bool = False,
+        atom_lb: float = 0.0,
+        coreactant_whitelist: Iterable = None
+
     ):
     '''
     Args
@@ -28,6 +31,9 @@ def construct_reaction_network(
     node_list:list[tuple]
         Entries are (id:int, properties:dict)
     '''
+    if atom_lb and connect_nontrivial:
+        raise ValueError("Cannot enforce atom fraction lower bound if also including non-trivial similarity-based connections, which to not capture conservation of mass.")
+
     fix_op_w_sim = [10540, 15237] # Known problems w/ operator-reaction mapping
     include_edge_props = ('smarts', 'rhea_ids', 'imt_rules')
     direction_from_side = lambda side : 0 if side == 'rct_inlinks' else 1 if side == 'pdt_inlinks' else print("Error side key not found")
@@ -50,7 +56,7 @@ def construct_reaction_network(
         for rule, sides in rules.items():
             for side, adj_mat in sides.items():
                 direction = direction_from_side(side)
-                adj_mat = remove_cofactors(adj_mat, direction, smiles, cofactors)
+                adj_mat = remove_unpaired_cofactors(adj_mat, direction, smiles, unpaired_cofactors)
                 filtered_rules[rule][side] = adj_mat
 
         sel_adj_mats = handle_multiple_rules(filtered_rules) # Resolve cases with multiple rules
@@ -63,14 +69,15 @@ def construct_reaction_network(
             if direction == 0:
                 edge_props['smarts'] = ">>".join(edge_props['smarts'].split(">>")[::-1])
 
-            edge_list += nested_adj_mat_to_edge_list(adj_mat, edge_props, smi2id)
+            edge_list += nested_adj_mat_to_edge_list(adj_mat, edge_props, smi2id, atom_lb, coreactant_whitelist)
 
     
     if similarity_connections and side_counts:
         if connect_nontrivial:
-            sim_rids = list(similarity_connections.keys())
+            sim_rids = list(similarity_connections.keys() - operator_connections.keys())
         else:
-            sim_rids = [rid for rid in similarity_connections if 1 in side_counts[rid] and not 0 in side_counts[rid]]
+            sim_rids = {rid for rid in similarity_connections if 1 in side_counts[rid] and not 0 in side_counts[rid]}
+            sim_rids = list(sim_rids - operator_connections.keys())
         
         sim_rids += fix_op_w_sim # Patch
 
@@ -82,7 +89,7 @@ def construct_reaction_network(
                 if direction == 0:
                     edge_props['smarts'] = ">>".join(edge_props['smarts'].split(">>")[::-1])
 
-                edge_list += nested_adj_mat_to_edge_list([adj_mat], edge_props, smi2id)
+                edge_list += nested_adj_mat_to_edge_list([adj_mat], edge_props, smi2id, atom_lb, coreactant_whitelist)
 
     # Assemble node list
     node_ids = set()
@@ -98,18 +105,18 @@ def construct_reaction_network(
     return edge_list, node_list
         
 
-def remove_cofactors(adj_mat: dict[int, dict[int, float]], direction: int, smiles: list[str], cofactors: Iterable[str]):
+def remove_unpaired_cofactors(adj_mat: dict[int, dict[int, float]], direction: int, smiles: list[str], unpaired_cofactors: Iterable[str]):
     tmp = defaultdict(lambda : defaultdict(float))
     for i, inner in adj_mat.items():
         ismi = smiles[direction ^ 0][i]
                 
-        if ismi in cofactors:
+        if ismi in unpaired_cofactors:
             continue
     
         for j, weight in inner.items():
             jsmi = smiles[direction ^ 1][j]
             
-            if jsmi in cofactors:
+            if jsmi in unpaired_cofactors:
                 continue
 
             tmp[i][j] = weight
@@ -177,7 +184,7 @@ def handle_multiple_rules(rules: dict[str, dict]):
         
         return {}
 
-def translate_operator_adj_mat(adj_mat: dict[int: dict[int, float]], direction: int, smiles: str, smi2id: dict[str, ]) -> list[dict[int: dict[int, float]]]:
+def translate_operator_adj_mat(adj_mat: dict[int: dict[int, float]], direction: int, smiles: str, smi2id: dict[str, int]) -> list[dict[int: dict[int, float]]]:
     i2id = {i: smi2id[smiles[direction ^ 0][i]] for i in adj_mat}
     j2id = {j: smi2id[smiles[direction ^ 1][j]] for j in next(iter(adj_mat.values()))}
 
@@ -203,7 +210,13 @@ def translate_operator_adj_mat(adj_mat: dict[int: dict[int, float]], direction: 
         
         return expanded_adj_mat
 
-def nested_adj_mat_to_edge_list(adj_mat: list[dict[int: dict[int, float]]], edge_props:dict, smi2id:dict) -> list[tuple]:
+def nested_adj_mat_to_edge_list(
+        adj_mat: list[dict[int: dict[int, float]]],
+        edge_props:dict,
+        smi2id:dict,
+        atom_lb: float,
+        coreactant_whitelist: Iterable[str]
+    ) -> list[tuple]:
     rcts, pdts = [side.split(".") for side in edge_props["smarts"].split(">>")]
     pull_other_subs = lambda x, exclude : dict(Counter([elt for elt in x if smi2id[elt] != exclude]))
     iids = adj_mat[0].keys()
@@ -219,12 +232,23 @@ def nested_adj_mat_to_edge_list(adj_mat: list[dict[int: dict[int, float]]], edge
     # Note: returns as (from, to, props) because this is what networkx add_edges_from() expects
     edge_list = []
     for i in inlinks:
-        if inlinks[i]['from'] != -1:
-            j = inlinks[i]['from']
-            requires = pull_other_subs(rcts, j)
-            other_products = pull_other_subs(pdts, i)
-            props = { **edge_props, **{'weight':inlinks[i]['weight'], "requires": requires, "other_products": other_products} }
-            edge_list.append((j, i, props))
+        if inlinks[i]['from'] == -1:
+            continue
+        
+        j = inlinks[i]['from']
+        requires = pull_other_subs(rcts, j)
+        atom_frac = inlinks[i]['weight']
+
+        if atom_frac < atom_lb:
+            continue
+
+        if coreactant_whitelist:
+            if any([k not in coreactant_whitelist for k in requires.keys()]):
+                continue
+
+        other_products = pull_other_subs(pdts, i)
+        props = { **edge_props, **{'weight':atom_frac, "requires": requires, "other_products": other_products} }
+        edge_list.append((j, i, props))
 
     return edge_list
 
@@ -295,7 +319,7 @@ class SimilarityConnector:
     def __init__(
             self, reactions: dict[int, dict],
             cc_sim_mats: dict[str, np.ndarray],
-            cofactors: dict[str, str],
+            unpaired_cofactors: dict[str, str],
             k_paired_cofactors: int = 21,
             n_rxns_lb: int = 5,
             include_paired_cofactors: Iterable[tuple] = [('ATP', 'AMP')]
@@ -307,14 +331,14 @@ class SimilarityConnector:
         cc_sim_mats: dict[str, np.ndarray]
             Compound-compound similarity matrices. Indices assumed
             to be order of appearance in reactions TODO: Change this assumption. Too tenuous
-        cofactors: dict[str, str]
+        unpaired_cofactors: dict[str, str]
             SMILES to name for unpaired cofactors
         k_paired_cofactors: int
         n_rxns_lb: int
         include_paired_cofactors: Iterable[tuple]
         '''
         self.reactions = reactions
-        self.cofactors = cofactors
+        self.unpaired_cofactors = unpaired_cofactors
         self.cc_sim_mats = cc_sim_mats
         self.compounds, self.smi2id  = extract_compounds(reactions)
         self.cc_sim_mats['jaccard'] = self._construct_rxn_co_occurence_jaccard()
@@ -324,8 +348,8 @@ class SimilarityConnector:
         cpd_corr = np.zeros(shape=(len(self.compounds), len(self.compounds)))
         for rxn in self.reactions.values():
             lhs, rhs = [set(side.split(".")) for side in rxn['smarts'].split(">>")] # Set out stoichiometric degeneracy
-            lhs = [elt for elt in lhs if elt not in self.cofactors]
-            rhs = [elt for elt in rhs if elt not in self.cofactors]
+            lhs = [elt for elt in lhs if elt not in self.unpaired_cofactors]
+            rhs = [elt for elt in rhs if elt not in self.unpaired_cofactors]
 
             for pair in product(lhs, rhs):
                 i, j = [self.smi2id[elt] for elt in pair]
@@ -343,8 +367,8 @@ class SimilarityConnector:
         rxns_per_cpd = defaultdict(float)
         for rxn in self.reactions.values():
             lhs, rhs = [set(side.split(".")) for side in rxn['smarts'].split(">>")] # Set out stoichiometric degeneracy
-            lhs = [elt for elt in lhs if elt not in self.cofactors]
-            rhs = [elt for elt in rhs if elt not in self.cofactors]
+            lhs = [elt for elt in lhs if elt not in self.unpaired_cofactors]
+            rhs = [elt for elt in rhs if elt not in self.unpaired_cofactors]
 
             for elt in chain(lhs, rhs):
                 rxns_per_cpd[self.smi2id[elt]] += 1
@@ -377,8 +401,8 @@ class SimilarityConnector:
         rcts, pdts = [[smi for smi in side.split(".")] for side in self.reactions[rid]['smarts'].split(">>")] # SMILES
 
         # List ids for self.compounds. Mark unpaired cofactors wth None
-        rct_ids = set([self.smi2id[smi] for smi in rcts if smi not in self.cofactors])
-        pdt_ids = set([self.smi2id[smi] for smi in pdts if smi not in self.cofactors])
+        rct_ids = set([self.smi2id[smi] for smi in rcts if smi not in self.unpaired_cofactors])
+        pdt_ids = set([self.smi2id[smi] for smi in pdts if smi not in self.unpaired_cofactors])
 
         # No substrates on either side after removing unpaired cofactors
         if len(rct_ids) == 0 or len(pdt_ids) == 0:
@@ -587,7 +611,7 @@ if __name__ == '__main__':
 
     # Load unpaired cofactors
     with open(filepaths['cofactors'] / '241008_unpaired_cofactors.json', 'r') as f:
-        cofactors = json.load(f)
+        unpaired_cofactors = json.load(f)
 
     # Load cc sim mats
     cc_sim_mats = {
@@ -615,6 +639,8 @@ if __name__ == '__main__':
         similarity_connections=sim_cxn,
         side_counts=side_counts,
         reactions=krs,
-        cofactors=cofactors,
-        connect_nontrivial=True
+        unpaired_cofactors=unpaired_cofactors,
+        connect_nontrivial=False,
+        atom_lb=0.6,
+        coreactant_whitelist=["O"]
     )

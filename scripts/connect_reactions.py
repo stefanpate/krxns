@@ -76,7 +76,6 @@ def _similarity(args):
     with open(filepaths['connected_reactions'] / f"{Path(args.reactions).stem}_side_counts.json", 'w') as f:
         json.dump(side_counts, f)
 
-
 parser = ArgumentParser(description="Connects substrates in a reaction to construct a reaction network")
 subparsers = parser.add_subparsers(title="Commands", description="Available commands")
 
