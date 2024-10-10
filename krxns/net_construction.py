@@ -31,7 +31,7 @@ def construct_reaction_network(
     node_list:list[tuple]
         Entries are (id:int, properties:dict)
     '''
-    if atom_lb and connect_nontrivial:
+    if atom_lb != 0.0 and connect_nontrivial:
         raise ValueError("Cannot enforce atom fraction lower bound if also including non-trivial similarity-based connections, which to not capture conservation of mass.")
 
     fix_op_w_sim = [10540, 15237] # Known problems w/ operator-reaction mapping

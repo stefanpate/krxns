@@ -5,13 +5,36 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "args2",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": [
+                "whitelist",
+                "10",
+                "pickaxe_whitelist"
+            ]
+        },
+        {
             "name": "args",
             "type": "debugpy",
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
             "args": [
-                "sprhea_10.json"
+                "shortest",
+                "sprhea_240310_v3_mapped_operator.json",
+                "sprhea_240310_v3_mapped.json",
+                "expanded_unpaired_cofactors.json",
+                "--similarity_connections",
+                "sprhea_240310_v3_mapped_similarity.json",
+                "--side_counts",
+                "sprhea_240310_v3_mapped_side_counts.json",
+                "--atom_lb",
+                "0.5",
+                "--coreactant_whitelist",
+                "pickaxe_whitelist.json"
             ]
         },
         {
