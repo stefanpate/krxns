@@ -219,6 +219,18 @@ def nested_adj_mat_to_edge_list(
     ) -> list[tuple]:
     rcts, pdts = [side.split(".") for side in edge_props["smarts"].split(">>")]
     pull_other_subs = lambda x, exclude : dict(Counter([elt for elt in x if smi2id[elt] != exclude]))
+
+    def fails_whitelist_check(whitelist: dict, requires: dict, other_products: dict):
+        for k in requires.keys():
+            if k not in whitelist:
+                return True
+            elif whitelist[k] is None:
+                pass
+            elif whitelist[k] not in other_products:
+                return True
+        return False
+
+
     iids = adj_mat[0].keys()
     
     inlinks = {i: {'from': -1, 'weight': -1} for i in iids}
@@ -237,16 +249,15 @@ def nested_adj_mat_to_edge_list(
         
         j = inlinks[i]['from']
         requires = pull_other_subs(rcts, j)
+        other_products = pull_other_subs(pdts, i)
         atom_frac = inlinks[i]['weight']
 
         if atom_frac < atom_lb:
             continue
 
-        if coreactant_whitelist:
-            if any([k not in coreactant_whitelist for k in requires.keys()]):
-                continue
+        if coreactant_whitelist and fails_whitelist_check(coreactant_whitelist, requires, other_products):
+            continue
 
-        other_products = pull_other_subs(pdts, i)
         props = { **edge_props, **{'weight':atom_frac, "requires": requires, "other_products": other_products} }
         edge_list.append((j, i, props))
 

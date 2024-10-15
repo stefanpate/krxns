@@ -30,12 +30,18 @@ def _store_coreactant_whitelist(args):
         filepath_or_buffer=filepaths['cofactors'] / "paired_cofactors_reference.tsv",
         sep='\t'
     )
-    paired_cofactors = expand_paired_cofactors(paired_ref, k=args.topk)
 
-    coreactant_whitelist = {smi for smi in chain(unpaired_cofactors.keys(), *paired_cofactors.keys())}
+    coreactant_whitelist ={}
+
+    for i, row in paired_ref.iterrows():
+        coreactant_whitelist[row['Smiles 1']] = row['Smiles 2']
+        coreactant_whitelist[row['Smiles 2']] = row['Smiles 1']
+
+    for k in unpaired_cofactors.keys():
+        coreactant_whitelist[k] = None
 
     with open(filepaths['cofactors'] / f"{args.save_to}.json", "w") as f:
-        json.dump(list(coreactant_whitelist), f)
+        json.dump(coreactant_whitelist, f)
 
 parser = ArgumentParser(description="Store cofactor files for downstream use constructing and traversing reaction networks.")
 subparsers = parser.add_subparsers(title="Commands", description="Available commands")
@@ -48,7 +54,7 @@ parser_unpaired.set_defaults(func=_store_unpaired_cofactors)
 
 # Whitelist coreactants
 parser_whitelist = subparsers.add_parser("whitelist", help="Tautomer expand and store coreactant whitelist")
-parser_whitelist.add_argument("topk", type=int, help="Number of top scoring tautomers to keep")
+# parser_whitelist.add_argument("topk", type=int, help="Number of top scoring tautomers to keep")
 parser_whitelist.add_argument("save_to", help="Save to file name")
 parser_whitelist.set_defaults(func=_store_coreactant_whitelist)
 
