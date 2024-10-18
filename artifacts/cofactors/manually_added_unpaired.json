@@ -3,5 +3,6 @@
     "[H][H]": "H2",
     "S": "hydrogen sufide",
     "[Cl-]": "chloride",
-    "[Na+]": "sodium"
+    "[Na+]": "sodium",
+    "[K+]": "potassium"
 }

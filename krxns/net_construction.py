@@ -348,7 +348,7 @@ class SimilarityConnector:
         n_rxns_lb: int
         include_paired_cofactors: Iterable[tuple]
         '''
-        self.reactions = reactions
+        self.reactions = fold_reactions(reactions)
         self.unpaired_cofactors = unpaired_cofactors
         self.cc_sim_mats = cc_sim_mats
         self.compounds, self.smi2id  = extract_compounds(reactions)
@@ -364,14 +364,16 @@ class SimilarityConnector:
 
             for pair in product(lhs, rhs):
                 i, j = [self.smi2id[elt] for elt in pair]
-                cpd_corr[i, j] += 1
-                cpd_corr[j, i] += 1
+                
+                if i != j: # i = 708 is an example of this corner case
+                    cpd_corr[i, j] += 1
+                    cpd_corr[j, i] += 1
             
         row_sum = cpd_corr.sum(axis=1).reshape(-1, 1)
         col_sum = cpd_corr.sum(axis=0).reshape(1, -1)
-        cpd_corr = np.where((row_sum + col_sum - cpd_corr) != 0, cpd_corr / (row_sum + col_sum - cpd_corr), 0) # Jaccard co-occurence-in-rxn index. Symmetric
+        cpd_jaccard = cpd_corr / (row_sum + col_sum - cpd_corr) # Jaccard co-occurence-in-rxn index. Symmetric
 
-        return cpd_corr
+        return cpd_jaccard
 
     def _make_paired_cofactors(self, k_paired_cofactors, n_rxns_lb, include_paired_cofactors):
         id2jaccard = {}
@@ -396,7 +398,7 @@ class SimilarityConnector:
         add_idxs = []
         for elt in include_paired_cofactors:
             try:
-                idx = srt_cofactor_names.index(elt)
+                idx = srt_cofactor_names.index(tuple(sorted(elt)))
                 add_idxs.append(idx)
             except ValueError:
                 continue

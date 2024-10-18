@@ -65,7 +65,7 @@ def _similarity(args):
     sc = SimilarityConnector(
         reactions=known_reactions,
         cc_sim_mats=cc_sim_mats,
-        cofactors=cofactors
+        unpaired_cofactors=cofactors
     )
 
     results, side_counts = sc.connect_reactions()
