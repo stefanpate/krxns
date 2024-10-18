@@ -331,7 +331,7 @@ class SimilarityConnector:
             self, reactions: dict[int, dict],
             cc_sim_mats: dict[str, np.ndarray],
             unpaired_cofactors: dict[str, str],
-            k_paired_cofactors: int = 21,
+            k_paired_cofactors: int = 25,
             n_rxns_lb: int = 5,
             include_paired_cofactors: Iterable[tuple] = [('ATP', 'AMP')]
         ) -> None:
