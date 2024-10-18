@@ -53,7 +53,7 @@ def _similarity(args):
     known_reactions = _load_reactions(args.reactions)
 
     # Load unpaired cofactors
-    with open(filepaths['cofactors'] / '241008_unpaired_cofactors.json', 'r') as f:
+    with open(filepaths['cofactors'] / 'unpaired_cofactors.json', 'r') as f:
         cofactors = json.load(f)
 
     # Load cc sim mats
