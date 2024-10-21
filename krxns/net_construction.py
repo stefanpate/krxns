@@ -530,7 +530,8 @@ def fold_reactions(reactions: dict[str, dict]):
 
 def extract_compounds(reactions: dict):
         '''
-        Extracts compounds from reaction dict.
+        Extracts compounds from reaction dict, assigning them
+        indices in lexicographical order of SMILES.
 
         Args
         ----

@@ -4,6 +4,7 @@ from rdkit.Chem import rdFMCS, rdFingerprintGenerator, BRICS, Draw, Mol, AllChem
 from rdkit.Chem.MolStandardize import rdMolStandardize
 from rdkit.Chem.rdChemReactions import ChemicalReaction
 from itertools import product, chain
+from collections import Counter
 import re
 import pandas
 import numpy as np
@@ -339,3 +340,31 @@ def neutralize_charges(mol: Chem.rdchem.Mol) -> Chem.rdchem.Mol:
             rms = AllChem.ReplaceSubstructs(mol, reactant, product)
             mol = rms[0]
     return mol
+
+def count_elements(molecule: str | Chem.Mol):
+    # Check if molecule is a SMILES string or a Mol object
+    if isinstance(molecule, str):
+        mol = Chem.MolFromSmiles(molecule)
+        if mol is None:
+            raise ValueError("Invalid SMILES string.")
+    elif isinstance(molecule, Chem.Mol):
+        mol = molecule
+    else:
+        raise TypeError("Input must be a SMILES string or an RDKit Mol object.")
+
+    # Initialize a counter for elements
+    element_counter = Counter()
+
+    # Count each element in the molecule
+    for atom in mol.GetAtoms():
+        element = atom.GetSymbol()
+        element_counter[element] += 1
+
+    # Return the counts as a dictionary
+    return dict(element_counter)
+
+
+if __name__ == '__main__':
+    smiles = "CCO"  # Ethanol
+    result = count_elements(smiles)
+    print(result)  # Output: {'C': 2, 'O': 1, 'H': 6}

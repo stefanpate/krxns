@@ -28,14 +28,19 @@ class SuperMultiDiGraph(nx.MultiDiGraph):
         else:
             return [self.edges[source, target, k] for k in self.ij2k[(source, target)]]
         
-    def shortest_path(self, source, target, rm_req_target: bool = True, quiet: bool = False) -> list:
-        if rm_req_target:
+    def shortest_path(self, source:int = None, target:int = None, rm_req_target: bool = True, quiet: bool = False) -> dict | list:
+        if source is None and target is None:
+            return nx.shortest_path(self)
+        elif (source is None) ^ (target is None):
+            raise ValueError("Provide both source and target or neither")
+        elif rm_req_target:
             target_smiles = self.nodes[target]['smiles']
             to_remove = [(i, j) for i, j, props in self.edges(data=True) if target_smiles in props['requires']]
             pruned = deepcopy(self)
             pruned.remove_edges_from(to_remove)
         else:
             pruned = self
+        
         try:
             node_path = nx.shortest_path(pruned, source, target)
         except NetworkXNoPath as e:
