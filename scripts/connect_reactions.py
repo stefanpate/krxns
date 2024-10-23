@@ -52,9 +52,9 @@ def _operator(args):
 def _similarity(args):
     known_reactions = _load_reactions(args.reactions)
 
-    # Load unpaired cofactors
-    with open(filepaths['cofactors'] / 'unpaired_cofactors.json', 'r') as f:
-        cofactors = json.load(f)
+    # Load unpaired coreactants
+    with open(filepaths['coreactants'] / 'unpaired_coreactants.json', 'r') as f:
+        coreactants = json.load(f)
 
     # Load cc sim mats
     cc_sim_mats = {
@@ -65,7 +65,7 @@ def _similarity(args):
     sc = SimilarityConnector(
         reactions=known_reactions,
         cc_sim_mats=cc_sim_mats,
-        unpaired_cofactors=cofactors
+        unpaired_coreactants=coreactants
     )
 
     results, side_counts = sc.connect_reactions()

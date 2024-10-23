@@ -12,7 +12,7 @@ from tqdm import tqdm
 def construct_reaction_network(
         operator_connections: dict[int, dict],
         reactions: dict[int, dict],
-        unpaired_cofactors: Iterable[str],
+        unpaired_coreactants: Iterable[str],
         similarity_connections:dict[int, dict] = {},
         side_counts:dict[int, list] = {},
         connect_nontrivial: bool = False,
@@ -51,12 +51,12 @@ def construct_reaction_network(
         
         smiles = [elt.split('.') for elt in reactions[rid]['smarts'].split('>>')]
 
-        # Remove unpaired cofactors
+        # Remove unpaired coreactants
         filtered_rules = defaultdict(lambda : defaultdict(dict))
         for rule, sides in rules.items():
             for side, adj_mat in sides.items():
                 direction = direction_from_side(side)
-                adj_mat = remove_unpaired_cofactors(adj_mat, direction, smiles, unpaired_cofactors)
+                adj_mat = remove_unpaired_coreactants(adj_mat, direction, smiles, unpaired_coreactants)
                 filtered_rules[rule][side] = adj_mat
 
         sel_adj_mats = handle_multiple_rules(filtered_rules) # Resolve cases with multiple rules
@@ -105,18 +105,18 @@ def construct_reaction_network(
     return edge_list, node_list
         
 
-def remove_unpaired_cofactors(adj_mat: dict[int, dict[int, float]], direction: int, smiles: list[str], unpaired_cofactors: Iterable[str]):
+def remove_unpaired_coreactants(adj_mat: dict[int, dict[int, float]], direction: int, smiles: list[str], unpaired_coreactants: Iterable[str]):
     tmp = defaultdict(lambda : defaultdict(float))
     for i, inner in adj_mat.items():
         ismi = smiles[direction ^ 0][i]
                 
-        if ismi in unpaired_cofactors:
+        if ismi in unpaired_coreactants:
             continue
     
         for j, weight in inner.items():
             jsmi = smiles[direction ^ 1][j]
             
-            if jsmi in unpaired_cofactors:
+            if jsmi in unpaired_coreactants:
                 continue
 
             tmp[i][j] = weight
@@ -217,16 +217,34 @@ def nested_adj_mat_to_edge_list(
         atom_lb: float,
         coreactant_whitelist: Iterable[str]
     ) -> list[tuple]:
+    '''
+    Converts (mutliple) m_pdts x n_rcts adjacency matrices into list of edges between
+    the molecules in those reactions, roughly respecting conservation of mass.
+
+    Args
+    -----
+    adj_mat: list[dict[int: dict[int, float]]]
+    edge_props:dict
+    smi2id:dict
+    atom_lb: float
+    coreactant_whitelist: Iterable[str]
+    
+    '''
+
     rcts, pdts = [side.split(".") for side in edge_props["smarts"].split(">>")]
     pull_other_subs = lambda x, exclude : dict(Counter([elt for elt in x if smi2id[elt] != exclude]))
 
-    def fails_whitelist_check(whitelist: dict, requires: dict, other_products: dict):
-        for k in requires.keys():
+    def fails_whitelist_check(whitelist: dict, coreactants: dict, coproducts: dict):
+        '''
+        Returns True if required co-reactants are not in the whitelist or if they are
+        in the whitelist but co-products do not feature their canonical pairs.
+        '''
+        for k in coreactants.keys():
             if k not in whitelist:
                 return True
-            elif whitelist[k] is None:
+            elif whitelist[k] is None: # Unpaired coreactant
                 pass
-            elif whitelist[k] not in other_products:
+            elif all([cp not in coproducts for cp in whitelist[k]]):
                 return True
         return False
 
@@ -248,17 +266,17 @@ def nested_adj_mat_to_edge_list(
             continue
         
         j = inlinks[i]['from']
-        requires = pull_other_subs(rcts, j)
-        other_products = pull_other_subs(pdts, i)
+        coreactants = pull_other_subs(rcts, j)
+        coproducts = pull_other_subs(pdts, i)
         atom_frac = inlinks[i]['weight']
 
         if atom_frac < atom_lb:
             continue
 
-        if coreactant_whitelist and fails_whitelist_check(coreactant_whitelist, requires, other_products):
+        if coreactant_whitelist and fails_whitelist_check(coreactant_whitelist, coreactants, coproducts):
             continue
 
-        props = { **edge_props, **{'weight':atom_frac, "requires": requires, "other_products": other_products} }
+        props = { **edge_props, **{'weight':atom_frac, "coreactants": coreactants, "coproducts": coproducts} }
         edge_list.append((j, i, props))
 
     return edge_list
@@ -330,37 +348,37 @@ class SimilarityConnector:
     def __init__(
             self, reactions: dict[int, dict],
             cc_sim_mats: dict[str, np.ndarray],
-            unpaired_cofactors: dict[str, str],
-            k_paired_cofactors: int = 25,
+            unpaired_coreactants: dict[str, str],
+            k_paired_coreactants: int = 25,
             n_rxns_lb: int = 5,
-            include_paired_cofactors: Iterable[tuple] = [('ATP', 'AMP')]
+            include_paired_coreactants: Iterable[tuple] = [('ATP', 'AMP')]
         ) -> None:
         '''
         Args
         -----
         self, reactions: dict[int, dict]
         cc_sim_mats: dict[str, np.ndarray]
-            Compound-compound similarity matrices. Indices assumed
-            to be order of appearance in reactions TODO: Change this assumption. Too tenuous
-        unpaired_cofactors: dict[str, str]
-            SMILES to name for unpaired cofactors
-        k_paired_cofactors: int
+            Compound-compound similarity matrices. Indices assumed in order of
+            lexicographically sorted set of unique SMILES in a given reaction set
+        unpaired_coreactants: dict[str, str]
+            SMILES to name for unpaired coreactants
+        k_paired_coreactants: int
         n_rxns_lb: int
-        include_paired_cofactors: Iterable[tuple]
+        include_paired_coreactants: Iterable[tuple]
         '''
         self.reactions = fold_reactions(reactions)
-        self.unpaired_cofactors = unpaired_cofactors
+        self.unpaired_coreactants = unpaired_coreactants
         self.cc_sim_mats = cc_sim_mats
         self.compounds, self.smi2id  = extract_compounds(reactions)
         self.cc_sim_mats['jaccard'] = self._construct_rxn_co_occurence_jaccard()
-        self.paired_cofactors = self._make_paired_cofactors(k_paired_cofactors, n_rxns_lb, include_paired_cofactors)
+        self.paired_coreactants = self._make_paired_coreactants(k_paired_coreactants, n_rxns_lb, include_paired_coreactants)
     
     def _construct_rxn_co_occurence_jaccard(self):
         cpd_corr = np.zeros(shape=(len(self.compounds), len(self.compounds)))
         for rxn in self.reactions.values():
             lhs, rhs = [set(side.split(".")) for side in rxn['smarts'].split(">>")] # Set out stoichiometric degeneracy
-            lhs = [elt for elt in lhs if elt not in self.unpaired_cofactors]
-            rhs = [elt for elt in rhs if elt not in self.unpaired_cofactors]
+            lhs = [elt for elt in lhs if elt not in self.unpaired_coreactants]
+            rhs = [elt for elt in rhs if elt not in self.unpaired_coreactants]
 
             for pair in product(lhs, rhs):
                 i, j = [self.smi2id[elt] for elt in pair]
@@ -375,13 +393,13 @@ class SimilarityConnector:
 
         return cpd_jaccard
 
-    def _make_paired_cofactors(self, k_paired_cofactors, n_rxns_lb, include_paired_cofactors):
+    def _make_paired_coreactants(self, k_paired_coreactants, n_rxns_lb, include_paired_coreactants):
         id2jaccard = {}
         rxns_per_cpd = defaultdict(float)
         for rxn in self.reactions.values():
             lhs, rhs = [set(side.split(".")) for side in rxn['smarts'].split(">>")] # Set out stoichiometric degeneracy
-            lhs = [elt for elt in lhs if elt not in self.unpaired_cofactors]
-            rhs = [elt for elt in rhs if elt not in self.unpaired_cofactors]
+            lhs = [elt for elt in lhs if elt not in self.unpaired_coreactants]
+            rhs = [elt for elt in rhs if elt not in self.unpaired_coreactants]
 
             for elt in chain(lhs, rhs):
                 rxns_per_cpd[self.smi2id[elt]] += 1
@@ -393,17 +411,17 @@ class SimilarityConnector:
         srt_cofactor_pairs = sorted(id2jaccard, key=lambda x : id2jaccard[x], reverse=True)
         srt_cofactor_pairs = [pair for pair in srt_cofactor_pairs if all([rxns_per_cpd[id] > n_rxns_lb for id in pair])] # Filter out rare cpds
         
-        # Check for paired cofactors included by name
+        # Check for paired coreactants included by name
         srt_cofactor_names = [tuple(sorted([self.compounds[id]['name'] for id in pair])) for pair in srt_cofactor_pairs]
         add_idxs = []
-        for elt in include_paired_cofactors:
+        for elt in include_paired_coreactants:
             try:
                 idx = srt_cofactor_names.index(tuple(sorted(elt)))
                 add_idxs.append(idx)
             except ValueError:
                 continue
 
-        all_idxs = set([i for i in range(k_paired_cofactors)]) | set(add_idxs)
+        all_idxs = set([i for i in range(k_paired_coreactants)]) | set(add_idxs)
 
         return [srt_cofactor_pairs[idx] for idx in all_idxs]
     
@@ -413,19 +431,19 @@ class SimilarityConnector:
         
         rcts, pdts = [[smi for smi in side.split(".")] for side in self.reactions[rid]['smarts'].split(">>")] # SMILES
 
-        # List ids for self.compounds. Mark unpaired cofactors wth None
-        rct_ids = set([self.smi2id[smi] for smi in rcts if smi not in self.unpaired_cofactors])
-        pdt_ids = set([self.smi2id[smi] for smi in pdts if smi not in self.unpaired_cofactors])
+        # List ids for self.compounds. Mark unpaired coreactants wth None
+        rct_ids = set([self.smi2id[smi] for smi in rcts if smi not in self.unpaired_coreactants])
+        pdt_ids = set([self.smi2id[smi] for smi in pdts if smi not in self.unpaired_coreactants])
 
-        # No substrates on either side after removing unpaired cofactors
+        # No substrates on either side after removing unpaired coreactants
         if len(rct_ids) == 0 or len(pdt_ids) == 0:
             return {}, {}, [len(rct_ids), len(pdt_ids)]
 
-        # Initialize inlinks w/ all but unpaired cofactors
+        # Initialize inlinks w/ all but unpaired coreactants
         pdt_inlinks = {pdt_id: {rct_id: 0 for rct_id in rct_ids} for pdt_id in pdt_ids}
         rct_inlinks = {rct_id: {pdt_id: 0 for pdt_id in pdt_ids} for rct_id in rct_ids}
 
-        # Find paired cofactors, connect in inlinks, remove from rct/pdt ids
+        # Find paired coreactants, connect in inlinks, remove from rct/pdt ids
         # Remove best cofactor pair only
         to_remove = tuple()
         best_jaccard = 0
@@ -433,7 +451,7 @@ class SimilarityConnector:
             srt_pair = tuple(sorted(pair))
             jaccard = self.cc_sim_mats['jaccard'][srt_pair[0], srt_pair[1]]
 
-            if srt_pair in self.paired_cofactors and jaccard > best_jaccard:
+            if srt_pair in self.paired_coreactants and jaccard > best_jaccard:
                 to_remove = pair # Note NOT srt pair
                 best_jaccard = jaccard
 
@@ -450,7 +468,7 @@ class SimilarityConnector:
 
         nr_np = [len(rct_ids), len(pdt_ids)]
 
-        if nr_np[0] == 0 and nr_np[1] == 0: # Done after paired cofactors
+        if nr_np[0] == 0 and nr_np[1] == 0: # Done after paired coreactants
             return rct_inlinks, pdt_inlinks, sorted(nr_np)
         elif nr_np[0] == 0 and not nr_np[1] == 0: # Remaining pdts must connect lone rct paired cof
             for rem_id in pdt_ids:
@@ -623,9 +641,9 @@ if __name__ == '__main__':
     from krxns.utils import str2int
     import json
 
-    # Load unpaired cofactors
-    with open(filepaths['cofactors'] / '241008_unpaired_cofactors.json', 'r') as f:
-        unpaired_cofactors = json.load(f)
+    # Load unpaired coreactants
+    with open(filepaths['coreactants'] / '241008_unpaired_coreactants.json', 'r') as f:
+        unpaired_coreactants = json.load(f)
 
     # Load cc sim mats
     cc_sim_mats = {
@@ -653,7 +671,7 @@ if __name__ == '__main__':
         similarity_connections=sim_cxn,
         side_counts=side_counts,
         reactions=krs,
-        unpaired_cofactors=unpaired_cofactors,
+        unpaired_coreactants=unpaired_coreactants,
         connect_nontrivial=False,
         atom_lb=0.6,
         coreactant_whitelist=["O"]
