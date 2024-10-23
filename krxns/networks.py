@@ -35,7 +35,7 @@ class SuperMultiDiGraph(nx.MultiDiGraph):
             raise ValueError("Provide both source and target or neither")
         elif rm_req_target:
             target_smiles = self.nodes[target]['smiles']
-            to_remove = [(i, j) for i, j, props in self.edges(data=True) if target_smiles in props['requires']]
+            to_remove = [(i, j) for i, j, props in self.edges(data=True) if target_smiles in props['coreactants']]
             pruned = deepcopy(self)
             pruned.remove_edges_from(to_remove)
         else:

@@ -86,6 +86,7 @@ def construct_reaction_network(
             for side, adj_mat in similarity_connections[rid].items():
                 direction = direction_from_side(side)
                 edge_props = { **{'rid': rid}, **{prop: reactions[rid][prop] for prop in include_edge_props} }
+                
                 if direction == 0:
                     edge_props['smarts'] = ">>".join(edge_props['smarts'].split(">>")[::-1])
 
@@ -113,13 +114,13 @@ def remove_unpaired_coreactants(adj_mat: dict[int, dict[int, float]], direction:
         if ismi in unpaired_coreactants:
             continue
     
-        for j, weight in inner.items():
+        for j, haf in inner.items():
             jsmi = smiles[direction ^ 1][j]
             
             if jsmi in unpaired_coreactants:
                 continue
 
-            tmp[i][j] = weight
+            tmp[i][j] = haf
 
     return tmp
 
@@ -137,11 +138,11 @@ def handle_multiple_rules(rules: dict[str, dict]):
     for sides in rules.values():
         for side, outer in sides.items():
             for i, inner in outer.items():
-                for j, weight in inner.items():
+                for j, haf in inner.items():
                     if side == 'rct_inlinks':
-                        rct_inlinks_check[(i, j)].add(weight)
+                        rct_inlinks_check[(i, j)].add(haf)
                     elif side == 'pdt_inlinks':
-                        pdt_inlinks_check[(i, j)].add(weight)
+                        pdt_inlinks_check[(i, j)].add(haf)
 
     for v in rct_inlinks_check.values():
         if len(v) > 1:
@@ -185,6 +186,12 @@ def handle_multiple_rules(rules: dict[str, dict]):
         return {}
 
 def translate_operator_adj_mat(adj_mat: dict[int: dict[int, float]], direction: int, smiles: str, smi2id: dict[str, int]) -> list[dict[int: dict[int, float]]]:
+    '''
+    Convert operator adjacency matrices, which have molecules labeled by order
+    of appearance in the reaction, to those with molecules labeled by their unique
+    ID per lexicographical sort of their SMILES. If there are multiples of the same
+    unique molecule, multiple adjacency matrices are returned.
+    '''
     i2id = {i: smi2id[smiles[direction ^ 0][i]] for i in adj_mat}
     j2id = {j: smi2id[smiles[direction ^ 1][j]] for j in next(iter(adj_mat.values()))}
 
@@ -200,7 +207,7 @@ def translate_operator_adj_mat(adj_mat: dict[int: dict[int, float]], direction: 
 
     has_repeats = lambda x : any([len(v) > 1 for v in x.values()])
     if not has_repeats(id2i) and not has_repeats(id2j):
-        return [{i2id[i]: {j2id[j]: weight for j, weight in inner.items()} for i, inner in adj_mat.items()}]
+        return [{i2id[i]: {j2id[j]: haf for j, haf in inner.items()} for i, inner in adj_mat.items()}]
     else:
         expanded_adj_mat = []
         for i_combo in product(*id2i.values()):
@@ -248,19 +255,19 @@ def nested_adj_mat_to_edge_list(
                 return True
         return False
 
-
     iids = adj_mat[0].keys()
     
-    inlinks = {i: {'from': -1, 'weight': -1} for i in iids}
+    inlinks = {i: {'from': -1, 'haf': -1} for i in iids}
     for elt in adj_mat:
         for i, inner in elt.items():
-            neighbor, weight = sorted(inner.items(), key=lambda x : x[1], reverse=True)[0] # Max
-            if weight > inlinks[i]['weight']:
+            neighbor, haf = sorted(inner.items(), key=lambda x : x[1], reverse=True)[0] # Max
+            if haf > inlinks[i]['haf']:
                 inlinks[i]['from'] = neighbor
-                inlinks[i]['weight'] = weight
+                inlinks[i]['haf'] = haf
 
     # Note: returns as (from, to, props) because this is what networkx add_edges_from() expects
-    edge_list = []
+    triple_set = set()
+    edges = []
     for i in inlinks:
         if inlinks[i]['from'] == -1:
             continue
@@ -268,7 +275,7 @@ def nested_adj_mat_to_edge_list(
         j = inlinks[i]['from']
         coreactants = pull_other_subs(rcts, j)
         coproducts = pull_other_subs(pdts, i)
-        atom_frac = inlinks[i]['weight']
+        atom_frac = inlinks[i]['haf']
 
         if atom_frac < atom_lb:
             continue
@@ -276,10 +283,13 @@ def nested_adj_mat_to_edge_list(
         if coreactant_whitelist and fails_whitelist_check(coreactant_whitelist, coreactants, coproducts):
             continue
 
-        props = { **edge_props, **{'weight':atom_frac, "coreactants": coreactants, "coproducts": coproducts} }
-        edge_list.append((j, i, props))
+        # Ensure no repeats
+        if (j, i, atom_frac) not in triple_set:
+            triple_set.add((j, i, atom_frac))
+            props = { **edge_props, **{'weight':atom_frac, "coreactants": coreactants, "coproducts": coproducts} }
+            edges.append((j, i, props))
 
-    return edge_list
+    return edges
 
 def connect_reaction_w_operator(reaction: str, operator: str, atom_map_to_rct_idx: dict) -> dict:
     '''
