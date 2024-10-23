@@ -1,7 +1,7 @@
 from rdkit import Chem
 from rdkit.Chem import AllChem, Mol
 from krxns.cheminfo import post_standardize
-from itertools import permutations, chain, product
+from itertools import permutations, chain, product, combinations
 from collections import defaultdict, Counter
 from typing import Iterable
 import numpy as np
@@ -17,7 +17,8 @@ def construct_reaction_network(
         side_counts:dict[int, list] = {},
         connect_nontrivial: bool = False,
         atom_lb: float = 0.0,
-        coreactant_whitelist: Iterable = None
+        coreactant_whitelist: Iterable = None,
+        add_multi_mol_nodes: bool = False
 
     ):
     '''
@@ -26,9 +27,9 @@ def construct_reaction_network(
 
     Returns
     ---------
-    edge_list:list[tuple]
+    edges:list[tuple]
         Entries are (from:int, to:int, properties:dict)
-    node_list:list[tuple]
+    nodes:list[tuple]
         Entries are (id:int, properties:dict)
     '''
     if atom_lb != 0.0 and connect_nontrivial:
@@ -40,8 +41,9 @@ def construct_reaction_network(
 
     reactions = fold_reactions(reactions)
     compounds, smi2id = extract_compounds(reactions)
+    id2smi = {v: k for k, v in smi2id.items()}
     
-    edge_list = []
+    tmp_edges = []
 
     # Add from operator_connections
     for rid, rules in operator_connections.items():
@@ -69,7 +71,7 @@ def construct_reaction_network(
             if direction == 0:
                 edge_props['smarts'] = ">>".join(edge_props['smarts'].split(">>")[::-1])
 
-            edge_list += nested_adj_mat_to_edge_list(adj_mat, edge_props, smi2id, atom_lb, coreactant_whitelist)
+            tmp_edges += nested_adj_mat_to_edge_list(adj_mat, edge_props, smi2id, id2smi, atom_lb, coreactant_whitelist, add_multi_mol_nodes)
 
     
     if similarity_connections and side_counts:
@@ -90,20 +92,32 @@ def construct_reaction_network(
                 if direction == 0:
                     edge_props['smarts'] = ">>".join(edge_props['smarts'].split(">>")[::-1])
 
-                edge_list += nested_adj_mat_to_edge_list([adj_mat], edge_props, smi2id, atom_lb, coreactant_whitelist)
+                tmp_edges += nested_adj_mat_to_edge_list([adj_mat], edge_props, smi2id, id2smi, atom_lb, coreactant_whitelist, False) # Cannot add multi mol nodes without real atom fracs
 
-    # Assemble node list
-    node_ids = set()
-    for elt in edge_list:
-        for i in range(2):
-            node_ids.add(elt[i])
+    edges = []
+    next_node_id = 0
+    mols_to_node_id = {}
+    nodes = []
+    for elt in tmp_edges:
+        new_elt = []
+        for mols in elt[:2]:
+            if mols in mols_to_node_id:
+                this_node_id = mols_to_node_id[mols]
+            else:
+                mols_to_node_id[mols] = next_node_id
+                next_node_id += 1
+                this_node_id = mols_to_node_id[mols]
+                smiles, names = zip(*[(compounds[m]['smiles'], compounds[m]['name']) for m in mols])
+                smiles = ".".join(smiles)
+                nodes.append((this_node_id, {'smiles': smiles, 'names': names}))
+            
+            new_elt.append(this_node_id)
 
-    node_list = []
-    for id in node_ids:
-        node_props = compounds[id]
-        node_list.append((id, node_props))
+        new_elt.append(elt[-1])
+        new_elt = tuple(new_elt)
+        edges.append(new_elt)
 
-    return edge_list, node_list
+    return edges, nodes
         
 
 def remove_unpaired_coreactants(adj_mat: dict[int, dict[int, float]], direction: int, smiles: list[str], unpaired_coreactants: Iterable[str]):
@@ -114,13 +128,13 @@ def remove_unpaired_coreactants(adj_mat: dict[int, dict[int, float]], direction:
         if ismi in unpaired_coreactants:
             continue
     
-        for j, haf in inner.items():
+        for j, atom_frac in inner.items():
             jsmi = smiles[direction ^ 1][j]
             
             if jsmi in unpaired_coreactants:
                 continue
 
-            tmp[i][j] = haf
+            tmp[i][j] = atom_frac
 
     return tmp
 
@@ -138,11 +152,11 @@ def handle_multiple_rules(rules: dict[str, dict]):
     for sides in rules.values():
         for side, outer in sides.items():
             for i, inner in outer.items():
-                for j, haf in inner.items():
+                for j, atom_frac in inner.items():
                     if side == 'rct_inlinks':
-                        rct_inlinks_check[(i, j)].add(haf)
+                        rct_inlinks_check[(i, j)].add(atom_frac)
                     elif side == 'pdt_inlinks':
-                        pdt_inlinks_check[(i, j)].add(haf)
+                        pdt_inlinks_check[(i, j)].add(atom_frac)
 
     for v in rct_inlinks_check.values():
         if len(v) > 1:
@@ -207,7 +221,7 @@ def translate_operator_adj_mat(adj_mat: dict[int: dict[int, float]], direction: 
 
     has_repeats = lambda x : any([len(v) > 1 for v in x.values()])
     if not has_repeats(id2i) and not has_repeats(id2j):
-        return [{i2id[i]: {j2id[j]: haf for j, haf in inner.items()} for i, inner in adj_mat.items()}]
+        return [{i2id[i]: {j2id[j]: atom_frac for j, atom_frac in inner.items()} for i, inner in adj_mat.items()}]
     else:
         expanded_adj_mat = []
         for i_combo in product(*id2i.values()):
@@ -221,8 +235,10 @@ def nested_adj_mat_to_edge_list(
         adj_mat: list[dict[int: dict[int, float]]],
         edge_props:dict,
         smi2id:dict,
+        id2smi:dict,
         atom_lb: float,
-        coreactant_whitelist: Iterable[str]
+        coreactant_whitelist: Iterable[str],
+        add_multi_mol_nodes: bool
     ) -> list[tuple]:
     '''
     Converts (mutliple) m_pdts x n_rcts adjacency matrices into list of edges between
@@ -233,13 +249,14 @@ def nested_adj_mat_to_edge_list(
     adj_mat: list[dict[int: dict[int, float]]]
     edge_props:dict
     smi2id:dict
-    atom_lb: float
-    coreactant_whitelist: Iterable[str]
-    
+    id2smi:dict
+    atom_lb:float
+    coreactant_whitelist:Iterable[str]
+    add_multi_mol_nodes:bool
     '''
-
+    # global next_node_id, mol_tuple_to_node_id
+    get_cos = lambda candidates, exclude : dict(Counter([elt for elt in candidates if smi2id[elt] not in exclude]))
     rcts, pdts = [side.split(".") for side in edge_props["smarts"].split(">>")]
-    pull_other_subs = lambda x, exclude : dict(Counter([elt for elt in x if smi2id[elt] != exclude]))
 
     def fails_whitelist_check(whitelist: dict, coreactants: dict, coproducts: dict):
         '''
@@ -257,36 +274,67 @@ def nested_adj_mat_to_edge_list(
 
     iids = adj_mat[0].keys()
     
-    inlinks = {i: {'from': -1, 'haf': -1} for i in iids}
+    # Extract inlinks from sufficient (mixtures of) molecules
+    inlinks = {(i,): {'from':tuple(), 'atom_frac':-1} for i in iids}
     for elt in adj_mat:
         for i, inner in elt.items():
-            neighbor, haf = sorted(inner.items(), key=lambda x : x[1], reverse=True)[0] # Max
-            if haf > inlinks[i]['haf']:
-                inlinks[i]['from'] = neighbor
-                inlinks[i]['haf'] = haf
 
-    # Note: returns as (from, to, props) because this is what networkx add_edges_from() expects
+            if add_multi_mol_nodes:
+                neighbor_fracs = [(k, v) for k, v in inner.items() if v > atom_lb]
+                if neighbor_fracs:
+                    neighbor, atom_frac = zip(*neighbor_fracs)
+                    inlinks[(i,)]['from'] = neighbor
+                    inlinks[(i,)]['atom_frac'] = sum(atom_frac)
+            else:
+                neighbor, atom_frac = sorted(inner.items(), key=lambda x : x[1], reverse=True)[0] # Max
+                neighbor = (neighbor, )
+                
+                # If multiples of same unique mol, i, across multiple
+                # adj mats, take the max
+                if atom_frac > atom_lb and atom_frac > inlinks[(i,)]['atom_frac']:
+                    inlinks[(i,)]['from'] = neighbor
+                    inlinks[(i,)]['atom_frac'] = atom_frac
+
+    if add_multi_mol_nodes:
+        combo_lens = [2, 3] # Just two and 3 mol combos for now
+        non_currency_outputs = [elt for elt in inlinks.keys() if id2smi[elt[0]] not in coreactant_whitelist]
+        multi_inlinks = {}
+        for k in combo_lens:
+            for combo in combinations(non_currency_outputs, k):
+                rows = []
+                for c in combo:
+                    sufficient_candidates = inlinks[c]['from']
+                    sufficient_candidates = set(filter(lambda x : id2smi[x] not in coreactant_whitelist, sufficient_candidates))
+                    rows.append(sufficient_candidates)
+                sufficient = set.union(*rows)
+                
+                if len(sufficient) > 0:
+                    sufficient = tuple(sorted(sufficient))
+                    multi_source = {'from': sufficient, 'atom_frac':1.0} # TODO: Get actual weighted average of atom_frac, for now this is fine
+                    multi_inlinks[tuple(sorted(chain(*combo)))] = multi_source
+
+        inlinks = {**inlinks, **multi_inlinks}
+
+    # Add edges to network edge list
     triple_set = set()
     edges = []
     for i in inlinks:
-        if inlinks[i]['from'] == -1:
+        if len(inlinks[i]['from']) == 0 or inlinks[i]['atom_frac'] == -1:
             continue
         
         j = inlinks[i]['from']
-        coreactants = pull_other_subs(rcts, j)
-        coproducts = pull_other_subs(pdts, i)
-        atom_frac = inlinks[i]['haf']
-
-        if atom_frac < atom_lb:
-            continue
+        coreactants = get_cos(candidates=rcts, exclude=j)
+        coproducts = get_cos(candidates=pdts, exclude=i)
+        atom_frac = inlinks[i]['atom_frac']
 
         if coreactant_whitelist and fails_whitelist_check(coreactant_whitelist, coreactants, coproducts):
             continue
 
         # Ensure no repeats
+        # Note: gives (from, to, props) in order networkx expects
         if (j, i, atom_frac) not in triple_set:
             triple_set.add((j, i, atom_frac))
-            props = { **edge_props, **{'weight':atom_frac, "coreactants": coreactants, "coproducts": coproducts} }
+            props = { **edge_props, **{'atom_frac':atom_frac, "coreactants": coreactants, "coproducts": coproducts} }
             edges.append((j, i, props))
 
     return edges
@@ -652,14 +700,8 @@ if __name__ == '__main__':
     import json
 
     # Load unpaired coreactants
-    with open(filepaths['coreactants'] / '241008_unpaired_coreactants.json', 'r') as f:
+    with open(filepaths['coreactants'] / 'unpaired_coreactants.json', 'r') as f:
         unpaired_coreactants = json.load(f)
-
-    # Load cc sim mats
-    cc_sim_mats = {
-        'mcs': np.load(filepaths['sim_mats'] / "mcs.npy"),
-        'tanimoto': np.load(filepaths['sim_mats'] / "tanimoto.npy")
-    }
 
     # Load known reaction data
     with open(filepaths['data'] / 'sprhea_240310_v3_mapped.json', 'r') as f:
@@ -676,13 +718,21 @@ if __name__ == '__main__':
     with open(filepaths['connected_reactions'] / 'sprhea_240310_v3_mapped_side_counts.json', 'r') as f:
         side_counts = str2int(json.load(f))
 
-    construct_reaction_network(
+    # Load coreactant whitelist
+    with open(filepaths['coreactants'] / 'pickaxe_whitelist.json', 'r') as f:
+        coreactant_whitelist = json.load(f)
+
+    # Get known compounds
+    kcs, smi2id = extract_compounds(krs)
+
+    edges, nodes = construct_reaction_network(
         operator_connections=op_cxns,
         similarity_connections=sim_cxn,
         side_counts=side_counts,
         reactions=krs,
         unpaired_coreactants=unpaired_coreactants,
         connect_nontrivial=False,
-        atom_lb=0.6,
-        coreactant_whitelist=["O"]
+        atom_lb=0.0,
+        coreactant_whitelist=coreactant_whitelist,
+        add_multi_mol_nodes=True
     )
