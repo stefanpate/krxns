@@ -12,7 +12,6 @@ from tqdm import tqdm
 def construct_reaction_network(
         operator_connections: dict[int, dict],
         reactions: dict[int, dict],
-        unpaired_coreactants: Iterable[str],
         similarity_connections:dict[int, dict] = {},
         side_counts:dict[int, list] = {},
         connect_nontrivial: bool = False,
@@ -42,6 +41,7 @@ def construct_reaction_network(
     reactions = fold_reactions(reactions)
     compounds, smi2id = extract_compounds(reactions)
     id2smi = {v: k for k, v in smi2id.items()}
+    unpaired_coreactants = [k for k in coreactant_whitelist if coreactant_whitelist[k] is None]
     
     tmp_edges = []
 
@@ -306,6 +306,7 @@ def nested_adj_mat_to_edge_list(
                     sufficient_candidates = inlinks[c]['from']
                     sufficient_candidates = set(filter(lambda x : id2smi[x] not in coreactant_whitelist, sufficient_candidates))
                     rows.append(sufficient_candidates)
+                    
                 sufficient = set.union(*rows)
                 
                 if len(sufficient) > 0:
