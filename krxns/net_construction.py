@@ -100,7 +100,8 @@ def construct_reaction_network(
     nodes = []
     for elt in tmp_edges:
         new_elt = []
-        for mols in elt[:2]:
+        mols_st = elt[:2] # Starter target molecules tuples
+        for mols in mols_st:
             if mols in mols_to_node_id:
                 this_node_id = mols_to_node_id[mols]
             else:
@@ -109,7 +110,7 @@ def construct_reaction_network(
                 this_node_id = mols_to_node_id[mols]
                 smiles, names = zip(*[(compounds[m]['smiles'], compounds[m]['name']) for m in mols])
                 smiles = ".".join(smiles)
-                nodes.append((this_node_id, {'smiles': smiles, 'names': names}))
+                nodes.append((this_node_id, {'smiles': smiles, 'names': names, 'cpd_ids': mols}))
             
             new_elt.append(this_node_id)
 
@@ -283,7 +284,7 @@ def nested_adj_mat_to_edge_list(
                 neighbor_fracs = [(k, v) for k, v in inner.items() if v > atom_lb]
                 if neighbor_fracs:
                     neighbor, atom_frac = zip(*neighbor_fracs)
-                    inlinks[(i,)]['from'] = neighbor
+                    inlinks[(i,)]['from'] = tuple(sorted(neighbor)) # Keep cpd ids sorted
                     inlinks[(i,)]['atom_frac'] = sum(atom_frac)
             else:
                 neighbor, atom_frac = sorted(inner.items(), key=lambda x : x[1], reverse=True)[0] # Max
@@ -310,9 +311,9 @@ def nested_adj_mat_to_edge_list(
                 sufficient = set.union(*rows)
                 
                 if len(sufficient) > 0:
-                    sufficient = tuple(sorted(sufficient))
+                    sufficient = tuple(sorted(sufficient)) # Keep cpd ids sorted
                     multi_source = {'from': sufficient, 'atom_frac':1.0} # TODO: Get actual weighted average of atom_frac, for now this is fine
-                    multi_inlinks[tuple(sorted(chain(*combo)))] = multi_source
+                    multi_inlinks[tuple(sorted(chain(*combo)))] = multi_source # Keep cpd ids sorted
 
         inlinks = {**inlinks, **multi_inlinks}
 
