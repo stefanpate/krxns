@@ -312,7 +312,7 @@ def nested_adj_mat_to_edge_list(
                 
                 if len(sufficient) > 0:
                     sufficient = tuple(sorted(sufficient)) # Keep cpd ids sorted
-                    multi_source = {'from': sufficient, 'atom_frac':1.0} # TODO: Get actual weighted average of atom_frac, for now this is fine
+                    multi_source = {'from': sufficient, 'atom_frac': 1.0} # TODO: Get actual weighted average of atom_frac, for now this is fine
                     multi_inlinks[tuple(sorted(chain(*combo)))] = multi_source # Keep cpd ids sorted
 
         inlinks = {**inlinks, **multi_inlinks}
