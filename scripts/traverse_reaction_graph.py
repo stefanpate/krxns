@@ -2,6 +2,7 @@ from concurrent.futures import ProcessPoolExecutor
 from argparse import ArgumentParser
 from functools import partial
 import json
+import h5py
 from typing import Callable
 from networkx import Graph
 from collections import defaultdict
@@ -114,7 +115,7 @@ def main():
 
     paths = tmp
     
-    st_generator = ((i, j) for i in paths for j in paths[i]) # Starter target pairs (tasks)
+    st_generator = ((i, j) for i in list(paths.keys())[::1_000] for j in paths[i]) # Starter target pairs (tasks)
     
     # Select search function, worker initializer stuff
     if args.strategy == "greedy-tanimoto":
@@ -126,19 +127,20 @@ def main():
     with ProcessPoolExecutor(initializer=initializer, initargs=init_args) as pool:
         res = pool.map(fcn, st_generator)
 
-    traversed_paths = defaultdict(dict)
-    for pair, path in res:
-        i, j = pair
-        traversed_paths[i][j] = path
-
     save_dir = filepaths['results'] / "graph_traversal" / f"{args.rxns}"
     if not save_dir.exists():
         save_dir.mkdir(parents=True)
-    
-    with open(
-        save_dir / f"traversed_paths_{args.strategy}_max_steps_{args.max_steps}_{args.whitelist}_atom_lb_{int(args.atom_lb * 100)}p_multi_nodes_{args.multi_nodes}.json",
-        'w') as f:
-        json.dump(traversed_paths, f)
+
+    fp = save_dir / f"traversed_paths_{args.strategy}_max_steps_{args.max_steps}_{args.whitelist}_atom_lb_{int(args.atom_lb * 100)}p_multi_nodes_{args.multi_nodes}.h5"
+    with h5py.File(fp, 'w') as h5file:
+        for pair, path in res:
+            s, t = [str(elt) for elt in pair]
+            
+            if s not in h5file:
+                h5file.create_group(s)
+            
+            if t not in h5file[s]:
+                h5file[s].create_dataset(t, data=path)
 
 if __name__ == '__main__':
     main()
