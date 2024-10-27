@@ -115,7 +115,7 @@ def main():
 
     paths = tmp
     
-    st_generator = ((i, j) for i in list(paths.keys())[::1_000] for j in paths[i]) # Starter target pairs (tasks)
+    st_generator = ((i, j) for i in paths.keys() for j in paths[i]) # Starter target pairs (tasks)
     
     # Select search function, worker initializer stuff
     if args.strategy == "greedy-tanimoto":
