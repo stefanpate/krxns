@@ -135,6 +135,8 @@ def expand_unpaired_cofactors(df: pandas.DataFrame, k: int) -> dict:
 
 class MorganFingerPrinter:
     def __init__(self, radius: int = 2, length: int = 2048) -> None:
+        self.length = length
+        self.radius = radius
         self._generator = rdFingerprintGenerator.GetMorganGenerator(radius= radius, fpSize=length)
 
     def fingerprint(self, mol: rdkit.Chem.rdchem.Mol) -> np.ndarray:
@@ -363,8 +365,51 @@ def count_elements(molecule: str | Chem.Mol):
     # Return the counts as a dictionary
     return dict(element_counter)
 
+def calc_mfp_matrix(compounds: dict[int, str], dtype: np.dtype = np.int8):
+    '''
+    Calculate Morgan fingerprint matrix (n_mols x mfp_len)
+
+    Args
+    ----
+    compounds: dict[int, str]
+        ID to smiles
+    '''
+    mfper = MorganFingerPrinter()
+    mfps = [np.zeros(shape=(mfper.length,)) for _ in range(max(compounds.keys()) + 1)]
+    for k in compounds.keys():
+        mol = Chem.MolFromSmiles(compounds[k])
+        mfps[k] = mfper.fingerprint(mol)
+
+    return np.vstack(mfps).astype(dtype)
+
+def multi_mol_tanimoto(mix1: np.ndarray, mix2: np.ndarray, dtype: np.dtype = np.float64):
+    '''
+    Calculate tanimoto similarity between "mixtures" of
+    molecules in multi mol nodes
+
+    Args
+    ----
+    mix1, mix2
+        Morgan fingerprint bit vecs (n_mols_in_mix, fingerprint_length)
+    '''
+    elt_wise_union = lambda arr : (arr.sum(axis=0) > 0)
+    mfp1 = elt_wise_union(mix1)
+    mfp2 = elt_wise_union(mix2)
+    dp = np.dot(mfp1, mfp2)
+    tani = dp / (mfp1.sum() + mfp2.sum() - dp)
+
+    return dtype(tani)
+
 
 if __name__ == '__main__':
     smiles = "CCO"  # Ethanol
     result = count_elements(smiles)
     print(result)  # Output: {'C': 2, 'O': 1, 'H': 6}
+
+    mfper = MorganFingerPrinter()
+    mfp = mfper.fingerprint(Chem.MolFromSmiles(smiles)).reshape(1, -1)
+    tani = multi_mol_tanimoto(mfp, mfp)
+    print(tani.dtype)
+
+    print(globals()['mfp'])
+

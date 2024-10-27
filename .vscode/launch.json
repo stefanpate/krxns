@@ -20,21 +20,11 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "args": [
-                "topk",
-                "--path-sims",
-                "sprhea_240310_v3_mapped/path_similarities_to_target_tanimoto_top_25_whitelist_atom_lb_20p_multi_nodes_False_ds_1000",
-                "sprhea_240310_v3_mapped/path_similarities_to_target_tanimoto_top_25_whitelist_atom_lb_20p_multi_nodes_False_ds_10",
-                "sprhea_240310_v3_mapped/path_similarities_to_target_tanimoto_top_25_whitelist_atom_lb_20p_multi_nodes_False_ds_100",
-                "sprhea_240310_v3_mapped/path_similarities_to_target_tanimoto_top_25_whitelist_atom_lb_20p_multi_nodes_False_ds_1000",
-                "sprhea_240310_v3_mapped/path_similarities_to_target_tanimoto_top_25_whitelist_atom_lb_20p_multi_nodes_True_ds_100",
-                "sprhea_240310_v3_mapped/path_similarities_to_target_tanimoto_top_25_whitelist_atom_lb_20p_multi_nodes_True_ds_1000",
-                "--successor-sims",
-                "sprhea_240310_v3_mapped/successor_similarities_to_target_tanimoto_top_25_whitelist_atom_lb_20p_multi_nodes_False_ds_1000",
-                "sprhea_240310_v3_mapped/successor_similarities_to_target_tanimoto_top_25_whitelist_atom_lb_20p_multi_nodes_False_ds_10",
-                "sprhea_240310_v3_mapped/successor_similarities_to_target_tanimoto_top_25_whitelist_atom_lb_20p_multi_nodes_False_ds_100",
-                "sprhea_240310_v3_mapped/successor_similarities_to_target_tanimoto_top_25_whitelist_atom_lb_20p_multi_nodes_False_ds_1000",
-                "sprhea_240310_v3_mapped/successor_similarities_to_target_tanimoto_top_25_whitelist_atom_lb_20p_multi_nodes_True_ds_100",
-                "sprhea_240310_v3_mapped/successor_similarities_to_target_tanimoto_top_25_whitelist_atom_lb_20p_multi_nodes_True_ds_1000"
+                "greedy-tanimoto",
+                "50",
+                "top_25_whitelist",
+                "0.2",
+                "--multi-nodes"
             ]
         },
         {

@@ -3,17 +3,13 @@ from krxns.config import filepaths
 from krxns.utils import str2int
 from krxns.networks import SuperMultiDiGraph
 from krxns.net_construction import construct_reaction_network, extract_compounds
-from krxns.cheminfo import MorganFingerPrinter
+from krxns.cheminfo import calc_mfp_matrix, multi_mol_tanimoto
 import json
 import numpy as np
 from scipy.stats import spearmanr
 from collections import defaultdict
 from tqdm.contrib.concurrent import process_map
-import multiprocessing as mp
-from rdkit import Chem
 import networkx as nx
-from functools import partial
-from time import perf_counter
 
 def yield_decisions(path_tanis: dict, successor_tanis: dict, topks: list):
     for k in topks:
@@ -80,32 +76,6 @@ def get_tani_sims(path: list):
     except Exception as e:
         print(f"Error in child: {e}")
 
-def multi_mol_tanimoto(mix1: np.ndarray, mix2: np.ndarray):
-    '''
-    Calculate tanimoto similarity between "mixtures" of
-    molecules in multi mol nodes
-    '''
-    elt_wise_union = lambda arr : (arr.sum(axis=0) > 0).astype(int)
-    mfp1 = elt_wise_union(mix1)
-    mfp2 = elt_wise_union(mix2)
-    dp = np.dot(mfp1, mfp2)
-    tani = dp / (mfp1.sum() + mfp2.sum() - dp)
-
-    return tani
-
-def calc_mfp_matrix(compounds: dict):
-    '''
-    Calculate Morgan fingerprint matrix (n_mols x mfp_len)
-    '''
-    mfp_len = 1024
-    mfper = MorganFingerPrinter(length=1024)
-    mfps = [np.zeros(shape=(mfp_len,)) for _ in range(max(compounds.keys()) + 1)]
-    for k in compounds.keys():
-        mol = Chem.MolFromSmiles(compounds[k]['smiles'])
-        mfps[k] = mfper.fingerprint(mol)
-
-    return np.vstack(mfps)
-
 def pathwise_sim_to_target(args):
     '''
     Computes similarity of intermediates along paths to targets
@@ -149,7 +119,8 @@ def pathwise_sim_to_target(args):
     G.add_nodes_from(nodes)
     G.add_edges_from(edges)
 
-    cpds, smi2id = extract_compounds(rxns) # Get known compounds
+    cpds, _ = extract_compounds(rxns) # Get known compounds
+    cpds = {k: v['smiles'] for k, v in cpds.items()}
 
     print("Getting shortest paths")
     paths = G.shortest_path() # Get shortest paths
