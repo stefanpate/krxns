@@ -21,7 +21,7 @@
             "console": "integratedTerminal",
             "args": [
                 "greedy-tanimoto",
-                "50",
+                "5",
                 "top_25_whitelist",
                 "0.2",
                 "--multi-nodes"

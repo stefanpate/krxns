@@ -2,10 +2,10 @@ from concurrent.futures import ProcessPoolExecutor
 from argparse import ArgumentParser
 from functools import partial
 import json
-import h5py
+import pyarrow as pa
+import pyarrow.parquet as pq
 from typing import Callable
 from networkx import Graph
-from collections import defaultdict
 from krxns.utils import str2int
 from krxns.config import filepaths
 from krxns.cheminfo import calc_mfp_matrix, multi_mol_tanimoto
@@ -36,17 +36,16 @@ def init_process_tani(main_G, main_M):
 def search(pair: tuple, max_steps: int, forward: Callable[[int, int, Graph], int]):
     starter, target = pair
     intermediate = starter
-    path = [intermediate]
+    path = str(intermediate)
     while intermediate != target and len(path) <= max_steps + 1:
         intermediate = forward(intermediate, target, G)
         
         if intermediate is None:
-            return (pair, path)
+            return (starter, target, path)
 
-        path.append(intermediate)
+        path += f",{str(intermediate)}"
 
-    return (pair, path)
-
+    return (starter, target, path)
 
 parser = ArgumentParser(description="Traverse reaction network with selected strategy")
 parser.add_argument("strategy", help="Which strategy to traverse reaction net with (greedy-tanimoto, )")
@@ -115,7 +114,7 @@ def main():
 
     paths = tmp
     
-    st_generator = ((i, j) for i in paths.keys() for j in paths[i]) # Starter target pairs (tasks)
+    st_generator = ((i, j) for i in paths for j in paths[i]) # Starter target pairs (tasks)
     
     # Select search function, worker initializer stuff
     if args.strategy == "greedy-tanimoto":
@@ -131,16 +130,16 @@ def main():
     if not save_dir.exists():
         save_dir.mkdir(parents=True)
 
-    fp = save_dir / f"traversed_paths_{args.strategy}_max_steps_{args.max_steps}_{args.whitelist}_atom_lb_{int(args.atom_lb * 100)}p_multi_nodes_{args.multi_nodes}.h5"
-    with h5py.File(fp, 'w') as h5file:
-        for pair, path in res:
-            s, t = [str(elt) for elt in pair]
-            
-            if s not in h5file:
-                h5file.create_group(s)
-            
-            if t not in h5file[s]:
-                h5file[s].create_dataset(t, data=path)
+    # Save to parquet
+    fp = save_dir / f"traversed_paths_{args.strategy}_max_steps_{args.max_steps}_{args.whitelist}_atom_lb_{int(args.atom_lb * 100)}p_multi_nodes_{args.multi_nodes}.parquet"
+    col_names = ["starter", "target", "path"]
+    starter, target, path = list(zip(*res))
+    starter = pa.array(starter, type=pa.int16())
+    target = pa.array(target, type=pa.int16())
+    path = pa.array(path, type=pa.string())
+    res = pa.table([starter, target, path], names=col_names)
+    pq.write_table(res, fp)
+
 
 if __name__ == '__main__':
     main()
