@@ -20,9 +20,8 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "args": [
-                "top_25_whitelist",
-                "0.2",
-                "--multi-nodes"
+                "shortest_path_length/sprhea_240310_v3_mapped_top_25_whitelist_atom_lb_20p_multi_nodes_True",
+                "2",
             ]
         },
         {
