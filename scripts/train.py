@@ -15,34 +15,50 @@ Save: model, hyperparams to tracking csv, predictions, metrics
 '''
 
 import pandas as pd
-from lightning import pytorch as pl
-from chemprop import data, featurizers, models, nn
+from lightning.pytorch import Trainer
+from lightning.pytorch.loggers import CSVLogger
+from chemprop import featurizers, nn
 from chemprop.nn import metrics
 from chemprop.models import multi
 from argparse import ArgumentParser
-
-def load_data(n_chunks: int, data_dir: str) -> pd.DataFrame:
-    data = []
-    for i in range(n_chunks):
-        data.append(pd.read_parquet(data_dir / f"chunk_{i}.parquet"))
-
-    data = pd.concat(data, axis=0).reset_index()
-    return data
-
-def featurize_data() -> nn.Dataloader: 
-    pass
-
-def split_data():
-    pass
-
-
+from krxns.config import filepaths
+from krxns.ml import load_data, split_data, featurize_data
 
 parser = ArgumentParser(description="Construct model and fit on train data")
 parser.add_argument("data_dir", help="Path ")
 parser.add_argument("n_chunks", type=int, help="Number of data chunks to load")
+parser.add_argument("--split-idx", type=int, default=-1, help="CV split form 0 to k - 1. If not provided, train on all data")
 
 def main(args):
-    pass
+    all_data = load_data(filepaths['data'] / args.data_dir, args.n_chunks)
+    featurizer = featurizers.SimpleMoleculeMolGraphFeaturizer() # TODO: extend to others w/ CL arg selecting
+
+    if args.split_idx >= 0:
+        train_data, val_data = split_data(all_data, args.split_idx)
+        train_data, scaler = featurize_data(train_data, featurizer, train_mode=True) # Should only shuffle for train dataloader (see chemprop docs)
+        val_data, _ = featurize_data(val_data, featurizer, train_mode=False)
+    else:
+        train_data, scaler = featurize_data(all_data, featurizer, train_mode=True)
+
+    # Construct model
+    mcmp = nn.MulticomponentMessagePassing(blocks=[nn.BondMessagePassing()], n_components=2, shared=True)
+    agg = nn.MeanAggregation()
+    output_transform = nn.UnscaleTransform.from_standard_scaler(scaler)
+    ffn = nn.RegressionFFN(input_dim=mcmp.output_dim, output_transform=output_transform)
+    metric_list = [metrics.RMSE(), metrics.MAE()] # Only the first metric is used for training and early stopping
+    mcmpnn = multi.MulticomponentMPNN(mcmp, agg, ffn, metrics=metric_list, batch_norm=True)
+
+    # Fit
+    save_dir = filepaths['spl_cv'] / f"hp_0" / f"split_{args.split_idx}"
+    logger = CSVLogger(save_dir=save_dir, name=None, version="version_0") # Overwrites
+    trainer = Trainer(
+        logger=logger,
+        enable_progress_bar=True,
+        accelerator="auto",
+        devices=1,
+        max_epochs=3, # number of epochs to train for
+    )
+    trainer.fit(model=mcmpnn, train_dataloaders=train_data, val_dataloaders=val_data)
 
 if __name__ == '__main__':
     args = parser.parse_args()
