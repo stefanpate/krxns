@@ -282,19 +282,23 @@ def nested_adj_mat_to_edge_list(
 
             if add_multi_mol_nodes:
                 neighbor_fracs = [(k, v) for k, v in inner.items() if v > atom_lb]
+                
                 if neighbor_fracs:
                     neighbor, atom_frac = zip(*neighbor_fracs)
-                    inlinks[(i,)]['from'] = tuple(sorted(neighbor)) # Keep cpd ids sorted
-                    inlinks[(i,)]['atom_frac'] = sum(atom_frac)
+                    atom_frac = sum(atom_frac)
+                else:
+                    neighbor = tuple()
+                    atom_frac = -1
+
             else:
                 neighbor, atom_frac = sorted(inner.items(), key=lambda x : x[1], reverse=True)[0] # Max
                 neighbor = (neighbor, )
                 
-                # If multiples of same unique mol, i, across multiple
-                # adj mats, take the max
-                if atom_frac > atom_lb and atom_frac > inlinks[(i,)]['atom_frac']:
-                    inlinks[(i,)]['from'] = neighbor
-                    inlinks[(i,)]['atom_frac'] = atom_frac
+            # If multiples of same unique mol, i, across multiple
+            # adj mats, take the max
+            if atom_frac > atom_lb and atom_frac > inlinks[(i,)]['atom_frac']:
+                inlinks[(i,)]['from'] = tuple(sorted(neighbor))
+                inlinks[(i,)]['atom_frac'] = atom_frac
 
     if add_multi_mol_nodes:
         combo_lens = [2, 3] # Just two and 3 mol combos for now
