@@ -13,7 +13,7 @@ Train
 Test
 Save: model, hyperparams to tracking csv, predictions, metrics
 '''
-
+from time import perf_counter
 import pandas as pd
 from lightning.pytorch import Trainer
 from lightning.pytorch.loggers import CSVLogger
@@ -58,9 +58,12 @@ def main(args):
         enable_progress_bar=True,
         accelerator="auto",
         devices=1,
-        max_epochs=3, # number of epochs to train for
+        max_epochs=args.max_epochs, # number of epochs to train for
     )
+    tic = perf_counter()
     trainer.fit(model=mcmpnn, train_dataloaders=train_data, val_dataloaders=val_data)
+    toc = perf_counter()
+    print(f"Training took: {toc - tic:.2f} seconds")
 
 if __name__ == '__main__':
     args = parser.parse_args()
