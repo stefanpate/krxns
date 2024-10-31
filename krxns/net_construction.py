@@ -41,7 +41,7 @@ def construct_reaction_network(
     reactions = fold_reactions(reactions)
     compounds, smi2id = extract_compounds(reactions)
     id2smi = {v: k for k, v in smi2id.items()}
-    unpaired_coreactants = [k for k in coreactant_whitelist if coreactant_whitelist[k] is None]
+    unpaired_whitelist = [k for k in coreactant_whitelist if coreactant_whitelist[k] is None]
     
     tmp_edges = []
 
@@ -58,7 +58,7 @@ def construct_reaction_network(
         for rule, sides in rules.items():
             for side, adj_mat in sides.items():
                 direction = direction_from_side(side)
-                adj_mat = remove_unpaired_coreactants(adj_mat, direction, smiles, unpaired_coreactants)
+                adj_mat = remove_unpaired_whitelist(adj_mat, direction, smiles, unpaired_whitelist)
                 filtered_rules[rule][side] = adj_mat
 
         sel_adj_mats = handle_multiple_rules(filtered_rules) # Resolve cases with multiple rules
@@ -121,18 +121,18 @@ def construct_reaction_network(
     return edges, nodes
         
 
-def remove_unpaired_coreactants(adj_mat: dict[int, dict[int, float]], direction: int, smiles: list[str], unpaired_coreactants: Iterable[str]):
+def remove_unpaired_whitelist(adj_mat: dict[int, dict[int, float]], direction: int, smiles: list[str], unpaired_whitelist: Iterable[str]):
     tmp = defaultdict(lambda : defaultdict(float))
     for i, inner in adj_mat.items():
         ismi = smiles[direction ^ 0][i]
                 
-        if ismi in unpaired_coreactants:
+        if ismi in unpaired_whitelist:
             continue
     
         for j, atom_frac in inner.items():
             jsmi = smiles[direction ^ 1][j]
             
-            if jsmi in unpaired_coreactants:
+            if jsmi in unpaired_whitelist:
                 continue
 
             tmp[i][j] = atom_frac
@@ -255,7 +255,6 @@ def nested_adj_mat_to_edge_list(
     coreactant_whitelist:Iterable[str]
     add_multi_mol_nodes:bool
     '''
-    # global next_node_id, mol_tuple_to_node_id
     get_cos = lambda candidates, exclude : dict(Counter([elt for elt in candidates if smi2id[elt] not in exclude]))
     rcts, pdts = [side.split(".") for side in edge_props["smarts"].split(">>")]
 
@@ -263,6 +262,8 @@ def nested_adj_mat_to_edge_list(
         '''
         Returns True if required co-reactants are not in the whitelist or if they are
         in the whitelist but co-products do not feature their canonical pairs.
+        Applied as final check of edge before adding to edgelist.
+        TODO: Still necessary? For similarity connections?
         '''
         for k in coreactants.keys():
             if k not in whitelist:
@@ -272,13 +273,32 @@ def nested_adj_mat_to_edge_list(
             elif all([cp not in coproducts for cp in whitelist[k]]):
                 return True
         return False
+    
+    def skip_paired_whitelist(successor: int, predecessors: Iterable[int], whitelist: dict[str, str], id2smi: dict[int, str]):
+        '''
+        Returns True if the successor is a paired whitelisted coreactant and its pair is among the predecessors
+        '''
+        successor_smi = id2smi[successor]
+        predecessor_smis = [id2smi[p] for p in predecessors]
+        if successor_smi not in whitelist:
+            return False
+        elif whitelist[successor_smi] in predecessor_smis:
+            return True
+        else:
+            return False
 
     iids = adj_mat[0].keys()
     
     # Extract inlinks from sufficient (mixtures of) molecules
     inlinks = {(i,): {'from':tuple(), 'atom_frac':-1} for i in iids}
     for elt in adj_mat:
+
         for i, inner in elt.items():
+
+            # Skip over paired whitelist coreactants
+            if skip_paired_whitelist(successor=i, predecessors=elt.keys(),
+                    whitelist=coreactant_whitelist, id2smi=id2smi):
+                continue
 
             if add_multi_mol_nodes:
                 neighbor_fracs = [(k, v) for k, v in inner.items() if v > atom_lb]
@@ -292,7 +312,7 @@ def nested_adj_mat_to_edge_list(
 
             else:
                 neighbor, atom_frac = sorted(inner.items(), key=lambda x : x[1], reverse=True)[0] # Max
-                neighbor = (neighbor, )
+                neighbor = (neighbor,)
                 
             # If multiples of same unique mol, i, across multiple
             # adj mats, take the max
@@ -412,7 +432,7 @@ class SimilarityConnector:
     def __init__(
             self, reactions: dict[int, dict],
             cc_sim_mats: dict[str, np.ndarray],
-            unpaired_coreactants: dict[str, str],
+            unpaired_whitelist: dict[str, str],
             k_paired_coreactants: int = 25,
             n_rxns_lb: int = 5,
             include_paired_coreactants: Iterable[tuple] = [('ATP', 'AMP')]
@@ -424,14 +444,14 @@ class SimilarityConnector:
         cc_sim_mats: dict[str, np.ndarray]
             Compound-compound similarity matrices. Indices assumed in order of
             lexicographically sorted set of unique SMILES in a given reaction set
-        unpaired_coreactants: dict[str, str]
+        unpaired_whitelist: dict[str, str]
             SMILES to name for unpaired coreactants
         k_paired_coreactants: int
         n_rxns_lb: int
         include_paired_coreactants: Iterable[tuple]
         '''
         self.reactions = fold_reactions(reactions)
-        self.unpaired_coreactants = unpaired_coreactants
+        self.unpaired_whitelist = unpaired_whitelist
         self.cc_sim_mats = cc_sim_mats
         self.compounds, self.smi2id  = extract_compounds(reactions)
         self.cc_sim_mats['jaccard'] = self._construct_rxn_co_occurence_jaccard()
@@ -441,8 +461,8 @@ class SimilarityConnector:
         cpd_corr = np.zeros(shape=(len(self.compounds), len(self.compounds)))
         for rxn in self.reactions.values():
             lhs, rhs = [set(side.split(".")) for side in rxn['smarts'].split(">>")] # Set out stoichiometric degeneracy
-            lhs = [elt for elt in lhs if elt not in self.unpaired_coreactants]
-            rhs = [elt for elt in rhs if elt not in self.unpaired_coreactants]
+            lhs = [elt for elt in lhs if elt not in self.unpaired_whitelist]
+            rhs = [elt for elt in rhs if elt not in self.unpaired_whitelist]
 
             for pair in product(lhs, rhs):
                 i, j = [self.smi2id[elt] for elt in pair]
@@ -462,8 +482,8 @@ class SimilarityConnector:
         rxns_per_cpd = defaultdict(float)
         for rxn in self.reactions.values():
             lhs, rhs = [set(side.split(".")) for side in rxn['smarts'].split(">>")] # Set out stoichiometric degeneracy
-            lhs = [elt for elt in lhs if elt not in self.unpaired_coreactants]
-            rhs = [elt for elt in rhs if elt not in self.unpaired_coreactants]
+            lhs = [elt for elt in lhs if elt not in self.unpaired_whitelist]
+            rhs = [elt for elt in rhs if elt not in self.unpaired_whitelist]
 
             for elt in chain(lhs, rhs):
                 rxns_per_cpd[self.smi2id[elt]] += 1
@@ -496,8 +516,8 @@ class SimilarityConnector:
         rcts, pdts = [[smi for smi in side.split(".")] for side in self.reactions[rid]['smarts'].split(">>")] # SMILES
 
         # List ids for self.compounds. Mark unpaired coreactants wth None
-        rct_ids = set([self.smi2id[smi] for smi in rcts if smi not in self.unpaired_coreactants])
-        pdt_ids = set([self.smi2id[smi] for smi in pdts if smi not in self.unpaired_coreactants])
+        rct_ids = set([self.smi2id[smi] for smi in rcts if smi not in self.unpaired_whitelist])
+        pdt_ids = set([self.smi2id[smi] for smi in pdts if smi not in self.unpaired_whitelist])
 
         # No substrates on either side after removing unpaired coreactants
         if len(rct_ids) == 0 or len(pdt_ids) == 0:
@@ -706,8 +726,8 @@ if __name__ == '__main__':
     import json
 
     # Load unpaired coreactants
-    with open(filepaths['coreactants'] / 'unpaired_coreactants.json', 'r') as f:
-        unpaired_coreactants = json.load(f)
+    with open(filepaths['coreactants'] / 'unpaired_whitelist.json', 'r') as f:
+        unpaired_whitelist = json.load(f)
 
     # Load known reaction data
     with open(filepaths['data'] / 'sprhea_240310_v3_mapped.json', 'r') as f:
@@ -736,7 +756,7 @@ if __name__ == '__main__':
         similarity_connections=sim_cxn,
         side_counts=side_counts,
         reactions=krs,
-        unpaired_coreactants=unpaired_coreactants,
+        unpaired_whitelist=unpaired_whitelist,
         connect_nontrivial=False,
         atom_lb=0.0,
         coreactant_whitelist=coreactant_whitelist,
