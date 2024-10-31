@@ -25,9 +25,11 @@ from krxns.config import filepaths
 from krxns.ml import load_data, split_data, featurize_data
 
 parser = ArgumentParser(description="Construct model and fit on train data")
-parser.add_argument("data_dir", help="Path ")
+parser.add_argument("data_dir", help="Path dir containing chunks, relative to configs data path")
 parser.add_argument("n_chunks", type=int, help="Number of data chunks to load")
+parser.add_argument("max_epochs", type=int, help="Max number training epochs")
 parser.add_argument("--split-idx", type=int, default=-1, help="CV split form 0 to k - 1. If not provided, train on all data")
+parser.add_argument("--experiment-name", default=None, help="Organize logs into subdir")
 
 def main(args):
     all_data = load_data(filepaths['data'] / args.data_dir, args.n_chunks)
@@ -50,7 +52,7 @@ def main(args):
 
     # Fit
     save_dir = filepaths['spl_cv'] / f"hp_0" / f"split_{args.split_idx}"
-    logger = CSVLogger(save_dir=save_dir, name=None, version="version_0") # Overwrites
+    logger = CSVLogger(save_dir=save_dir, name=args.experiment_name, version=f"version_0") # TODO: will probably change
     trainer = Trainer(
         logger=logger,
         enable_progress_bar=True,
