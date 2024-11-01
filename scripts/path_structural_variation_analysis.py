@@ -251,7 +251,7 @@ parser_pst.set_defaults(func=pathwise_sim_to_target)
 
 # Pathwise spearman
 parser_pst = subparsers.add_parser("spearman", help="Computes pathwise spearman corelation coefficient")
-parser_pst.add_argument("files", nargs="+", help="Paths to files relative to path structural variability dir")
+parser_pst.add_argument("files", nargs="+", help="Paths to pathwise similarity files relative to path structural variability dir")
 parser_pst.set_defaults(func=calc_path_spearmans)
 
 # Top k choices

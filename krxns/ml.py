@@ -2,9 +2,9 @@
 Machine learning helpers
 '''
 import pandas as pd
-from torch.utils.data import DataLoader
+from torch.utils.data import Dataset
 from sklearn.model_selection import StratifiedKFold
-from typing import Any
+from chemprop.featurizers.base import GraphFeaturizer
 from chemprop import data
 from pathlib import Path
 
@@ -24,18 +24,9 @@ def load_data(data_dir: Path, n_chunks: int = None) -> pd.DataFrame:
     
     return df
 
-# TODO: Get the right types for featurizer and scaler
-def featurize_data(df: pd.DataFrame, featurizer:Any, train_mode:bool) -> tuple[DataLoader, Any]:
+def featurize_data(df: pd.DataFrame, featurizer: GraphFeaturizer) -> Dataset:
     '''
-    Converts dataframe with SMILES data to dataloader.
-
-    Args
-    ----
-    df
-    featurizer
-    train_mode:bool
-        If true will shuffle batches and return a target scaler, else does not shuffle
-        and returned scaler is None
+    Converts dataframe with SMILES data to torch dataset.
     '''
     smiles_cols = ['starter_smiles', 'target_smiles']
     target_cols = ['spl']
@@ -45,18 +36,9 @@ def featurize_data(df: pd.DataFrame, featurizer:Any, train_mode:bool) -> tuple[D
     datapoints += [[data.MoleculeDatapoint.from_smi(smis[i]) for smis in smiss] for i in range(1, len(smiles_cols))]
     datasets = [data.MoleculeDataset(datapoints[i], featurizer) for i in range(len(smiles_cols))]
     mc_dataset = data.MulticomponentDataset(datasets=datasets)
+    return mc_dataset
 
-    if train_mode:
-        scaler = mc_dataset.normalize_targets()
-    else:
-        scaler = None
-
-    dataloader = data.build_dataloader(mc_dataset, shuffle=train_mode)
-    
-    return dataloader, scaler
-
-def split_data(df: pd.DataFrame, split_idx: int) -> tuple[pd.DataFrame]:
-    k = 5
+def split_data(df: pd.DataFrame, split_idx: int, k: int = 5) -> tuple[pd.DataFrame]:
     if split_idx < 0 or split_idx > k:
         raise ValueError(f"Provided split index {split_idx} not between 0 and {k}")
     skf = StratifiedKFold(n_splits=k, shuffle=False)

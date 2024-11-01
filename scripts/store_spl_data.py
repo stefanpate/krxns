@@ -7,7 +7,7 @@ from krxns.net_construction import construct_reaction_network
 from krxns.networks import SuperMultiDiGraph
 from sklearn.model_selection import StratifiedKFold
 
-parser = ArgumentParser(description="Traverse reaction network with selected strategy")
+parser = ArgumentParser(description="Store shortest path length dataset in chunks")
 parser.add_argument("whitelist", help="Filename of coreactants whitelisted as currency")
 parser.add_argument("atom_lb", type=float, help="Below this fraction of heavy atoms, reactants will be ignored, i.e., not connected to products")
 parser.add_argument("--n-splits", type=int, default=1000, help="How many ways to divide the dataset")
