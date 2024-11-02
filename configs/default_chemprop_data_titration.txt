@@ -1,0 +1,4 @@
+ArrayTaskID    NChunks    MaxEpochs    SplitIdx
+1    1    100    0    
+2    5    100    0
+3    10    100    0
