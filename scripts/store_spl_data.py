@@ -61,10 +61,6 @@ def main(args):
     data = []
     for i in paths:
         for j in paths[i]:
-
-            if i == j: # Filter out self paths
-                continue
-
             spl = len(paths[i][j]) - 1
             data.append([i, j, G.nodes[i]['smiles'], G.nodes[j]['smiles'], spl])
 
