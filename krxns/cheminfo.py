@@ -372,7 +372,11 @@ def calc_mfp_matrix(compounds: dict[int, str], dtype: np.dtype = np.int8):
     Args
     ----
     compounds: dict[int, str]
-        ID to smiles
+        Node ID to SMILES
+
+    Returns
+    --------
+    nxd Morgan fingerprint embedding matrix
     '''
     mfper = MorganFingerPrinter()
     mfps = [np.zeros(shape=(mfper.length,)) for _ in range(max(compounds.keys()) + 1)]
@@ -382,25 +386,6 @@ def calc_mfp_matrix(compounds: dict[int, str], dtype: np.dtype = np.int8):
 
     return np.vstack(mfps).astype(dtype)
 
-def multi_mol_tanimoto(mix1: np.ndarray, mix2: np.ndarray, dtype: np.dtype = np.float64):
-    '''
-    Calculate tanimoto similarity between "mixtures" of
-    molecules in multi mol nodes
-
-    Args
-    ----
-    mix1, mix2
-        Morgan fingerprint bit vecs (n_mols_in_mix, fingerprint_length)
-    '''
-    elt_wise_union = lambda arr : (arr.sum(axis=0) > 0)
-    mfp1 = elt_wise_union(mix1)
-    mfp2 = elt_wise_union(mix2)
-    dp = np.dot(mfp1, mfp2)
-    tani = dp / (mfp1.sum() + mfp2.sum() - dp)
-
-    return dtype(tani)
-
-
 if __name__ == '__main__':
     smiles = "CCO"  # Ethanol
     result = count_elements(smiles)
@@ -408,8 +393,5 @@ if __name__ == '__main__':
 
     mfper = MorganFingerPrinter()
     mfp = mfper.fingerprint(Chem.MolFromSmiles(smiles)).reshape(1, -1)
-    tani = multi_mol_tanimoto(mfp, mfp)
-    print(tani.dtype)
-
     print(globals()['mfp'])
 
