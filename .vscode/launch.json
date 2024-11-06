@@ -20,8 +20,11 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "args": [
+                "tanimoto",
                 "top_25_whitelist",
                 "0.2",
+                "--downsample",
+                "1000",
                 "--multi-nodes",
             ]
         },
