@@ -8,37 +8,42 @@ from typing import Callable
 from networkx import Graph
 from krxns.utils import str2int
 from krxns.config import filepaths
-from krxns.cheminfo import calc_mfp_matrix, multi_mol_tanimoto
-from krxns.net_construction import construct_reaction_network, extract_compounds
+from krxns.cheminfo import calc_mfp_matrix, tanimoto_similarity
+from krxns.net_construction import construct_reaction_network
 from krxns.networks import SuperMultiDiGraph
+import numpy as np
 
 G = None # To be reaction network
 M = None # To be Morgan fingerprint matrix
 
-def greedy_tanimoto(intermediate: int, target: int, G: Graph):
+def greedy_tanimoto(intermediate: int, target: int, G: Graph, V: np.ndarray):
     options = []
-    M = globals()["M"]
+    t_mfp = V[target, :]
     for s in G.successors(intermediate):
-        s_mfp = M[G.nodes[s]['cpd_ids'], :]
-        t_mfp = M[G.nodes[target]['cpd_ids'], :]
-        sim_to_target = multi_mol_tanimoto(s_mfp, t_mfp)
+        s_mfp = V[s, :]
+        sim_to_target = tanimoto_similarity(s_mfp, t_mfp)
         options.append((s, sim_to_target))
 
     srt_options = sorted(options, key=lambda x : x[1], reverse=True)
 
     return srt_options[0][0] if options else None
 
-def init_process_tani(main_G, main_M):
-    global G, M
+def init_process(main_G, main_V):
+    '''
+    Initializes process with graph G and node embedding matrix V
+    '''
+    global G, V
     G = main_G
-    M = main_M
+    V = main_V
 
 def search(pair: tuple, max_steps: int, forward: Callable[[int, int, Graph], int]):
+    G = globals()["G"]
+    V = globals()["V"]
     starter, target = pair
     intermediate = starter
     path = str(intermediate)
     while intermediate != target and len(path) <= max_steps + 1:
-        intermediate = forward(intermediate, target, G)
+        intermediate = forward(intermediate, target, G, V)
         
         if intermediate is None:
             return (starter, target, path)
@@ -47,21 +52,7 @@ def search(pair: tuple, max_steps: int, forward: Callable[[int, int, Graph], int
 
     return (starter, target, path)
 
-parser = ArgumentParser(description="Traverse reaction network with selected strategy")
-parser.add_argument("strategy", help="Which strategy to traverse reaction net with (greedy-tanimoto, )")
-parser.add_argument("max_steps", type=int, help="Maximum number of steps to take from starter")
-parser.add_argument("whitelist", help="Filename of coreactants whitelisted as currency")
-parser.add_argument("atom_lb", type=float, help="Below this fraction of heavy atoms, reactants will be ignored, i.e., not connected to products")
-parser.add_argument("--op-cxns", default="sprhea_240310_v3_mapped_operator", help="Filename operator connected adjacency matrices")
-parser.add_argument("--rxns", default="sprhea_240310_v3_mapped", help="Reactions dataset")
-parser.add_argument("--sim-cxns", default="sprhea_240310_v3_mapped_similarity", help="Filename similarity connected adjacency matrices")
-parser.add_argument("--side-cts", default="sprhea_240310_v3_mapped_side_counts", help="Counts of unique, non-currency molecules on each side of reactions")
-parser.add_argument("--connect-nontrivial", action="store_true", help="Connect nontrivial reactions w/ similarity connections")
-parser.add_argument("--multi-nodes", action="store_true", help="Add multiple molecule nodes to network")
-
-def main():
-    args = parser.parse_args()
-
+def main(args):
     # Load known reaction data
     with open(filepaths['data'] / f"{args.rxns}.json", 'r') as f:
         rxns = json.load(f)
@@ -96,9 +87,7 @@ def main():
     G.add_nodes_from(nodes)
     G.add_edges_from(edges)
 
-    cpds, _ = extract_compounds(rxns) # Get known compounds
-    cpds = {k: v['smiles'] for k, v in cpds.items()}
-    M = calc_mfp_matrix(cpds)
+    node_smiles = {i: G.nodes[i]['smiles'] for i in G.nodes}
 
     print("Getting shortest paths")
     paths = G.shortest_path() # Get shortest paths
@@ -114,19 +103,19 @@ def main():
 
     paths = tmp
     
-    st_generator = ((i, j) for i in paths for j in paths[i]) # Starter target pairs (tasks)
-    
+    st_generator = ((i, j) for i in list(paths.keys())[::args.downsample] for j in paths[i]) # Starter target pairs (tasks)
+
     # Select search function, worker initializer stuff
     if args.strategy == "greedy-tanimoto":
         fcn = partial(search, max_steps=args.max_steps, forward=greedy_tanimoto)
-        initializer = init_process_tani
-        M = calc_mfp_matrix(cpds) # Morgan fingerprints
-        init_args = (G, M)
+        V = calc_mfp_matrix(node_smiles) # Morgan fingerprints
 
-    with ProcessPoolExecutor(initializer=initializer, initargs=init_args) as pool:
+    print("Traversing")
+    with ProcessPoolExecutor(initializer=init_process, initargs=(G, V)) as pool:
         res = pool.map(fcn, st_generator)
 
     save_dir = filepaths['results'] / "graph_traversal" / f"{args.rxns}"
+    
     if not save_dir.exists():
         save_dir.mkdir(parents=True)
 
@@ -140,6 +129,19 @@ def main():
     res = pa.table([starter, target, path], names=col_names)
     pq.write_table(res, fp)
 
+parser = ArgumentParser(description="Traverse reaction network with selected strategy")
+parser.add_argument("strategy", help="Which strategy to traverse reaction net with (greedy-tanimoto, )")
+parser.add_argument("max_steps", type=int, help="Maximum number of steps to take from starter")
+parser.add_argument("whitelist", help="Filename of coreactants whitelisted as currency")
+parser.add_argument("atom_lb", type=float, help="Below this fraction of heavy atoms, reactants will be ignored, i.e., not connected to products")
+parser.add_argument("--op-cxns", default="sprhea_240310_v3_mapped_operator", help="Filename operator connected adjacency matrices")
+parser.add_argument("--rxns", default="sprhea_240310_v3_mapped", help="Reactions dataset")
+parser.add_argument("--sim-cxns", default="sprhea_240310_v3_mapped_similarity", help="Filename similarity connected adjacency matrices")
+parser.add_argument("--side-cts", default="sprhea_240310_v3_mapped_side_counts", help="Counts of unique, non-currency molecules on each side of reactions")
+parser.add_argument("--connect-nontrivial", action="store_true", help="Connect nontrivial reactions w/ similarity connections")
+parser.add_argument("--multi-nodes", action="store_true", help="Add multiple molecule nodes to network")
+parser.add_argument("--downsample", type=int, default=1, help="Downsample path sources (starters) by this factor")
 
 if __name__ == '__main__':
-    main()
+    args = parser.parse_args()
+    main(args)

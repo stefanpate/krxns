@@ -3,14 +3,23 @@ from krxns.config import filepaths
 from krxns.utils import str2int
 from krxns.networks import SuperMultiDiGraph
 from krxns.net_construction import construct_reaction_network, extract_compounds
-from krxns.cheminfo import calc_mfp_matrix, multi_mol_tanimoto
+from krxns.cheminfo import calc_mfp_matrix, tanimoto_similarity
 import json
 import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr
 from collections import defaultdict
 from tqdm.contrib.concurrent import process_map
+from concurrent.futures import ProcessPoolExecutor
 import networkx as nx
+
+def init_process(main_G, main_V):
+    '''
+    Initializes process with graph G and node embedding matrix V
+    '''
+    global G, V
+    G = main_G
+    V = main_V
 
 def yield_decisions(path_values: dict, successor_values: dict, topks: list):
     for k in topks:
@@ -30,49 +39,68 @@ def count_topk(decision: tuple):
     less_than_chosen = [elt < (chosen + ep) for elt in sorted(successors, reverse=True)]
     chosen_rank = less_than_chosen.index(True)
     in_top_k = 1 if chosen_rank < k else 0
-    return (k, in_top_k)                        
+    return (k, in_top_k)
 
-def yield_path(paths: dict[dict], G: nx.Graph, T: np.ndarray, M:np.ndarray, downsample: int):
-    for i in list(paths.keys())[::downsample]:
-        for j in paths[i]:
-            path = paths[i][j]
-            path_cpd_ids = [G.nodes[p]['cpd_ids'] for p in path]
-            target = path_cpd_ids[-1]
-            successors_cpd_ids = [[G.nodes[s]['cpd_ids'] for s in G.successors(p)] for p in path[:-2]]
+def get_tani_sims(task: tuple):
+    V = globals()["V"]
+    G = globals()["G"]
+    starter, target, path = task
+    target_mfp = V[path[-1], :]
+    path_tanis = []
+    successor_tanis = []
+    for i, elt in enumerate(path):
+        path_tanis.append(tanimoto_similarity(V[elt, :], target_mfp))
 
-            target_mfp = M[target, :]
-            path_tani_mfp = []
-            for c in path_cpd_ids:
-                if len(target) == 1 and len(c) == 1:
-                    path_tani_mfp.append(T[target[0], c[0]])
-                else:
-                    path_tani_mfp.append(M[c, :])
+        if i < len(path) - 2:
+            tmp = []
+            for s in G.successors(elt):
+                tmp.append(tanimoto_similarity(V[s, :], target_mfp))
+            
+            successor_tanis.append(tmp)
 
-            successor_tani_mfp = []
-            for successors in successors_cpd_ids:
-                tmp = []
-                for s in successors:
-                    if len(target) == 1 and len(s) == 1:
-                        tmp.append(T[target[0], s[0]])
-                    else:
-                        tmp.append(M[s, :])
-                
-                successor_tani_mfp.append(tmp)
+    return [(starter, target), path_tanis, successor_tanis]
 
-            yield [(i, j), target_mfp, path_tani_mfp, successor_tani_mfp]
+def spearman(path_values: list):
+    x = np.arange(len(path_values))
+    return spearmanr(x, path_values).statistic
 
-def get_tani_sims(path: list):
-    st, target, path_tani_mfp, successor_tani_mfp = path
-    for i, elt in enumerate(path_tani_mfp):
-        if type(elt) is np.ndarray:
-            path_tani_mfp[i] = multi_mol_tanimoto(elt, target)
+def calc_path_spearmans(path_values: dict):
+    '''
+    Calculate spearmans coefficient between path similarities and 
+    reaction step
+    '''          
+    ps_generator = (path_values[i][j] for i in path_values for j in path_values[i])
+    print("Calculating spearman rs")
+    res = process_map(spearman, ps_generator, chunksize=10)
     
-    for i, successors in enumerate(successor_tani_mfp):
-        for j, elt in enumerate(successors):
-            if type(elt) is np.ndarray:
-                successor_tani_mfp[i][j] = multi_mol_tanimoto(elt, target)
+    col_names = ['starter_id', 'target_id', 'spearman_r']
+    path_spearmans = []
+    idx_generator = ((i, j) for i in path_values for j in path_values[i])
+    for n, (i, j) in enumerate(idx_generator):
+        path_spearmans.append([i, j, res[n]])
 
-    return [st, path_tani_mfp, successor_tani_mfp]
+    path_spearmans = pd.DataFrame(data=path_spearmans, columns=col_names)
+
+    return path_spearmans
+        
+def calc_topk_rates(path_values: dict, successor_values: dict, topks: list[int]):
+    '''
+    Calculate fraction of time shortest path proceeds to top k most 
+    similar intermediate to target
+    '''
+    decision_generator = yield_decisions(path_values, successor_values, topks)
+    print("Counting topk")
+    res = process_map(count_topk, decision_generator, chunksize=10)
+
+    in_top_k = {k: 0 for k in topks}
+    counts = {k: 0 for k in topks}
+    for k, flag in res:
+        in_top_k[k] += flag
+        counts[k] += 1
+
+    fracs = {k: in_top_k[k] / counts[k] if counts[k] > 0 else 0 for k in topks}
+
+    return fracs
 
 def pathwise_value_fcn(args):
     '''
@@ -117,8 +145,7 @@ def pathwise_value_fcn(args):
     G.add_nodes_from(nodes)
     G.add_edges_from(edges)
 
-    cpds, _ = extract_compounds(rxns) # Get known compounds
-    cpds = {k: v['smiles'] for k, v in cpds.items()}
+    node_smiles = {i: G.nodes[i]['smiles'] for i in G.nodes}
 
     print("Getting shortest paths")
     paths = G.shortest_path() # Get shortest paths
@@ -134,19 +161,16 @@ def pathwise_value_fcn(args):
     
     paths = tmp
 
-    print("Calculating MFPs and Tanis")
-    M = calc_mfp_matrix(cpds) # Morgan fingerprints
-    norms = np.sum(M, axis=1).reshape(-1, 1)
-    S = np.matmul(M, M.T)
-    T = S / (norms + norms.T - S) # Tanimoto sim mat
-
-    st_generator = yield_path(paths, G, T, M, downsample=args.downsample)
-    
+    print("Calculating node embeddings")
     if args.value_fcn == 'tanimoto':
         f = get_tani_sims
+        V = calc_mfp_matrix(node_smiles) # Morgan fingerprints
+
+    st_generator = ((i, j, paths[i][j]) for i in list(paths.keys())[::args.downsample] for j in paths[i])
 
     print("Processing paths")
-    res = process_map(f, st_generator, chunksize=10, total=int(n_paths / args.downsample))
+    with ProcessPoolExecutor(initializer=init_process, initargs=(G, V)) as pool:
+        res = pool.map(f, st_generator)
 
     path_values = defaultdict(dict)
     successor_values = defaultdict(dict)
@@ -173,58 +197,16 @@ def pathwise_value_fcn(args):
             string_values = ",".join([str(elt) for elt in path_values[i][j]])
             data.append([i, j, string_values])
     
-    path_values = pd.DataFrame(data=path_values, columns=cols)
+    path_values = pd.DataFrame(data=data, columns=cols)
 
-    path_values.to_parquet(save_dir / f"pathwise_{fn_tail}.parquet", index=False)
+    to_store = path_values.merge(right=path_spearmans, on=['starter_id', 'target_id'], how='left')
+    to_store.to_parquet(save_dir / f"pathwise_{fn_tail}.parquet", index=False)
     
     with open(save_dir / f"topk_{fn_tail}.json", 'w') as f:
         json.dump(topk_rates, f)
 
-    path_spearmans.to_parquet(save_dir / f"path_spearmans_{fn_tail}.parquet", index=False)
 
-def spearman(path_values: list):
-    x = np.arange(len(path_values))
-    return spearmanr(x, path_values).statistic
-
-def calc_path_spearmans(path_values: dict):
-    '''
-    Calculate spearmans coefficient between path similarities and 
-    reaction step
-    '''          
-    ps_generator = (path_values[i][j] for i in path_values for j in path_values[i])
-    print("Calculating spearman rs")
-    res = process_map(spearman, ps_generator, chunksize=10)
-    
-    col_names = ['starter_id', 'target_id', 'spearman_r']
-    path_spearmans = []
-    idx_generator = ((i, j) for i in path_values for j in path_values[i])
-    for n, (i, j) in enumerate(idx_generator):
-        path_spearmans.append([i, j, res[n]])
-
-    path_spearmans = pd.DataFrame(data=path_spearmans, columns=col_names)
-
-    return path_spearmans
-        
-def calc_topk_rates(path_values: dict, successor_values: dict, topks: list[int]):
-    '''
-    Calculate fraction of time shortest path proceeds to top k most 
-    similar intermediate to target
-    '''
-    decision_generator = yield_decisions(path_values, successor_values, topks)
-    print("Counting topk")
-    res = process_map(count_topk, decision_generator, chunksize=10)
-
-    in_top_k = {k: 0 for k in topks}
-    counts = {k: 0 for k in topks}
-    for k, flag in res:
-        in_top_k[k] += flag
-        counts[k] += 1
-
-    fracs = {k: in_top_k[k] / counts[k] if counts[k] > 0 else 0 for k in topks}
-
-    return fracs
-
-parser = ArgumentParser(description="Analyzes [blah] along paths. Saves [blah] along paths, calculates spearman w/ step index, saves topk")
+parser = ArgumentParser(description="Analyzes value fcn along paths. Saves value fcn along paths, calculates spearman w/ step index, saves topk")
 
 # Pathwise similarity calculations
 parser.add_argument("value_fcn", help="Which value function to use, e.g., tanimoto")
