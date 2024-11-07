@@ -18,7 +18,7 @@ M = None # To be Morgan fingerprint matrix
 
 def greedy_tanimoto(intermediate: int, target: int, G: Graph, V: np.ndarray):
     options = []
-    t_mfp = V[target['cpd_ids'], :]
+    t_mfp = V[target, :]
     for s in G.successors(intermediate):
         s_mfp = V[s, :]
         sim_to_target = tanimoto_similarity(s_mfp, t_mfp)
@@ -37,7 +37,7 @@ def init_process(main_G, main_V):
     V = main_V
 
 def search(pair: tuple, max_steps: int, forward: Callable[[int, int, Graph], int]):
-    G = globals["G"]
+    G = globals()["G"]
     V = globals()["V"]
     starter, target = pair
     intermediate = starter
@@ -52,9 +52,7 @@ def search(pair: tuple, max_steps: int, forward: Callable[[int, int, Graph], int
 
     return (starter, target, path)
 
-def main():
-    args = parser.parse_args()
-
+def main(args):
     # Load known reaction data
     with open(filepaths['data'] / f"{args.rxns}.json", 'r') as f:
         rxns = json.load(f)
@@ -105,13 +103,14 @@ def main():
 
     paths = tmp
     
-    st_generator = ((i, j) for i in paths for j in paths[i]) # Starter target pairs (tasks)
-    
+    st_generator = ((i, j) for i in list(paths.keys())[::args.downsample] for j in paths[i]) # Starter target pairs (tasks)
+
     # Select search function, worker initializer stuff
     if args.strategy == "greedy-tanimoto":
         fcn = partial(search, max_steps=args.max_steps, forward=greedy_tanimoto)
         V = calc_mfp_matrix(node_smiles) # Morgan fingerprints
 
+    print("Traversing")
     with ProcessPoolExecutor(initializer=init_process, initargs=(G, V)) as pool:
         res = pool.map(fcn, st_generator)
 
@@ -141,6 +140,8 @@ parser.add_argument("--sim-cxns", default="sprhea_240310_v3_mapped_similarity", 
 parser.add_argument("--side-cts", default="sprhea_240310_v3_mapped_side_counts", help="Counts of unique, non-currency molecules on each side of reactions")
 parser.add_argument("--connect-nontrivial", action="store_true", help="Connect nontrivial reactions w/ similarity connections")
 parser.add_argument("--multi-nodes", action="store_true", help="Add multiple molecule nodes to network")
+parser.add_argument("--downsample", type=int, default=1, help="Downsample path sources (starters) by this factor")
 
 if __name__ == '__main__':
-    main()
+    args = parser.parse_args()
+    main(args)
