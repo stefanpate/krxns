@@ -20,11 +20,12 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "args": [
-                "greedy-tanimoto",
-                "2",
+                "tanimoto",
                 "top_25_whitelist",
                 "0.2",
                 "--multi-nodes",
+                "--downsample",
+                "100000"
             ]
         },
         {
