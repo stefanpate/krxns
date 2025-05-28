@@ -1,97 +1,109 @@
-from argparse import ArgumentParser
-from krxns.config import filepaths
-from krxns.net_construction import connect_reaction_w_operator, SimilarityConnector, construct_op_atom_map_to_rct_idx
 import json
 import pandas as pd
-import numpy as np
-from collections import defaultdict
 from tqdm import tqdm
 from pathlib import Path
+import hydra
+from omegaconf import DictConfig
+from rdkit import Chem
 
-def _load_reactions(fn: str) -> dict:
-    # Load known reaction data
-    with open(filepaths['data'] / fn, 'r') as f:
-        known_reactions = json.load(f)
+def mass_balance(am_rxn: str) -> tuple[dict[int, dict[int, float]], dict[int, dict[int, float]]]:
+    '''
+    Returns fraction of atoms in a reactant / product coming from a product / reactant, respectivley.
 
-    known_reactions = {int(k): v for k,v in known_reactions.items()}
+    Args
+    ----
+    am_rxn:str
+        Atom-mapped reaction string in the form of "R1.R2.R3>>P1.P2.P3"
 
-    # Remove reverses
-    rids = set()
-    for k, v in known_reactions.items():
-        rids.add(tuple(sorted([k, v['reverse']])))
+    Returns
+    -------
+    rct_inlinks:dict
+        {rct_idx: {pdt_idx: fraction_atoms_from_pdt_idx}, }
+    pdt_inlinks:dict
+        {pdt_idx: {rct_idx: fraction_atoms_from_rct_idx}, }
+    '''
+    rcts, pdts = [
+        [Chem.MolFromSmiles(mol) for mol in side.split('.')]
+        for side in am_rxn.split('>>')
+    ]
+    n_atoms_rcts = [mol.GetNumAtoms() for mol in rcts]
+    n_atoms_pdts = [mol.GetNumAtoms() for mol in pdts]
+    
+    # Collect atom map numbers to rct / pdt indices
+    amn_to_rct_idx = {}
+    amn_to_pdt_idx = {}
+    _amns = []
+    amns_ = []
+    for rct_idx, rct in enumerate(rcts):
+        for atom in rct.GetAtoms():
+            amn = atom.GetAtomMapNum()
+            
+            if amn == 0:
+                raise ValueError("Atom map numbers must be non-zero.")
 
-    keepers = [elt[0] for elt in rids]
-    known_reactions = {k: known_reactions[k] for k in keepers}
+            amn_to_rct_idx[amn] = rct_idx
+            _amns.append(amn)
+    
+    for pdt_idx, pdt in enumerate(pdts):
+        for atom in pdt.GetAtoms():
+            amn = atom.GetAtomMapNum()
 
-    return known_reactions
+            if amn == 0:
+                raise ValueError("Atom map numbers must be non-zero.")
+            
+            amn_to_pdt_idx[amn] = pdt_idx
+            amns_.append(amn)
 
-def _operator(args):
-    known_reactions = _load_reactions(args.reactions)
-    ops = pd.read_csv(
-        filepath_or_buffer=filepaths['operators'] / "imt_ops.tsv",
-        sep='\t'
-    ).set_index("Name")
-    op_atom_map_to_rct_idx = construct_op_atom_map_to_rct_idx(ops)
+    # Check atom map nums are 1-to-1
+    amns = set(_amns) & set(amns_)
+    if len(amns) != len(_amns) or len(amns) != len(amns_):
+        raise ValueError("Atom map numbers are not 1-to-1 between reactants and products.")
 
-    results = defaultdict(lambda : defaultdict(dict))
-    for rid, rxn in tqdm(known_reactions.items()):
-        if not rxn['imt_rules']:
-            continue
+    # Count atoms received by molecule i from molecule j
+    rct_inlinks = {i: {j: 0.0 for j in range(len(pdts))} for i in range(len(rcts))}
+    pdt_inlinks = {i: {j: 0.0 for j in range(len(rcts))} for i in range(len(pdts))}
+    for amn in amns:
+        rct_idx = amn_to_rct_idx[amn]
+        pdt_idx = amn_to_pdt_idx[amn]
+        rct_inlinks[rct_idx][pdt_idx] += 1.0
+        pdt_inlinks[pdt_idx][rct_idx] += 1.0
 
-        for rule in rxn['imt_rules']:
-            rsma = rxn["smarts"]
-            op = ops.loc[rule, "SMARTS"]
-            am2rci = op_atom_map_to_rct_idx[rule]
-            rct_inlinks, pdt_inlinks = connect_reaction_w_operator(rsma, op, am2rci)
-            if len(rct_inlinks) > 0 and len(pdt_inlinks) > 0:
-                results[rid][rule] = {'rct_inlinks': rct_inlinks, 'pdt_inlinks':pdt_inlinks}
+    # Normalize by number of atoms in reactants / products
+    for rct_idx, pdt_dict in rct_inlinks.items():
+        for pdt_idx, count in pdt_dict.items():
+            rct_inlinks[rct_idx][pdt_idx] = count / n_atoms_rcts[rct_idx]
+    
+    for pdt_idx, rct_dict in pdt_inlinks.items():
+        for rct_idx, count in rct_dict.items():
+            pdt_inlinks[pdt_idx][rct_idx] = count / n_atoms_pdts[pdt_idx]
 
-    with open(filepaths['connected_reactions'] / f"{Path(args.reactions).stem}_operator.json", 'w') as f:
-        json.dump(results, f)
-
-def _similarity(args):
-    known_reactions = _load_reactions(args.reactions)
-
-    # Load unpaired coreactants
-    with open(filepaths['coreactants'] / 'unpaired_coreactants.json', 'r') as f:
-        coreactants = json.load(f)
-
-    # Load cc sim mats
-    cc_sim_mats = {
-        'mcs': np.load(filepaths['sim_mats'] / "mcs.npy"),
-        'tanimoto': np.load(filepaths['sim_mats'] / "tanimoto.npy")
-    }
-
-    sc = SimilarityConnector(
-        reactions=known_reactions,
-        cc_sim_mats=cc_sim_mats,
-        unpaired_coreactants=coreactants
+    return rct_inlinks, pdt_inlinks
+    
+@hydra.main(version_base=None, config_path="../configs", config_name="connect_reactions")
+def main(cfg: DictConfig):
+    rc_0_mapped = pd.read_parquet(
+        Path(cfg.filepaths.raw_data) / cfg.rc_plus_0_mapped
     )
 
-    results, side_counts = sc.connect_reactions()
+    mechinformed_mapped = pd.read_parquet(
+        Path(cfg.filepaths.raw_data) / cfg.mechinformed_mapped
+    )
 
-    with open(filepaths['connected_reactions'] / f"{Path(args.reactions).stem}_similarity.json", 'w') as f:
-        json.dump(results, f)
+    # Prefer the mechinformed atom mapping to the rc_plus_0
+    overlap = rc_0_mapped.rxn_id.isin(mechinformed_mapped.rxn_id)
+    mapped_rxns = pd.concat([mechinformed_mapped, rc_0_mapped[~overlap]], ignore_index=True)
 
-    with open(filepaths['connected_reactions'] / f"{Path(args.reactions).stem}_side_counts.json", 'w') as f:
-        json.dump(side_counts, f)
+    mass_links = {}
+    for _, row in tqdm(mapped_rxns.iterrows(), total=len(mapped_rxns)):
+        am_rxn = row['am_smarts']
+        rct_inlinks, pdt_inlinks = mass_balance(am_rxn)
+        mass_links[row['rxn_id']] = {
+            'rct_inlinks': rct_inlinks,
+            'pdt_inlinks': pdt_inlinks
+        }
 
-parser = ArgumentParser(description="Connects substrates in a reaction to construct a reaction network")
-subparsers = parser.add_subparsers(title="Commands", description="Available commands")
-
-# Connect with operator
-parser_rxn_embed = subparsers.add_parser("op-connect", help="Connects reaction substrates using operator and atom-mapping")
-parser_rxn_embed.add_argument("reactions", help="Filename of reaction dataset e.g., sprhea_240310_v3_mapped.json")
-parser_rxn_embed.set_defaults(func=_operator)
-
-# Connect with similarity scores
-parser_rxn_embed = subparsers.add_parser("sim-connect", help="Connects reaction substrates using similarity scores")
-parser_rxn_embed.add_argument("reactions", help="Filename of reaction dataset e.g., sprhea_240310_v3_mapped.json")
-parser_rxn_embed.set_defaults(func=_similarity)
-
-def main():
-    args = parser.parse_args()
-    args.func(args)
+    with open(Path(cfg.filepaths.interim_data) / "mass_links.json", 'w') as f:
+        json.dump(mass_links, f)        
 
 if __name__ == '__main__':
     main()
