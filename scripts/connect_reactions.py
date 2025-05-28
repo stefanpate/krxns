@@ -6,7 +6,7 @@ import hydra
 from omegaconf import DictConfig
 from rdkit import Chem
 
-def mass_balance(am_rxn: str) -> tuple[dict[int, dict[int, float]], dict[int, dict[int, float]]]:
+def mass_balance(am_rxn: str) -> dict[int, dict[int, float]]:
     '''
     Returns fraction of atoms in a reactant / product coming from a product / reactant, respectivley.
 
@@ -17,8 +17,6 @@ def mass_balance(am_rxn: str) -> tuple[dict[int, dict[int, float]], dict[int, di
 
     Returns
     -------
-    rct_inlinks:dict
-        {rct_idx: {pdt_idx: fraction_atoms_from_pdt_idx}, }
     pdt_inlinks:dict
         {pdt_idx: {rct_idx: fraction_atoms_from_rct_idx}, }
     '''
@@ -26,7 +24,6 @@ def mass_balance(am_rxn: str) -> tuple[dict[int, dict[int, float]], dict[int, di
         [Chem.MolFromSmiles(mol) for mol in side.split('.')]
         for side in am_rxn.split('>>')
     ]
-    n_atoms_rcts = [mol.GetNumAtoms() for mol in rcts]
     n_atoms_pdts = [mol.GetNumAtoms() for mol in pdts]
     
     # Collect atom map numbers to rct / pdt indices
@@ -60,24 +57,18 @@ def mass_balance(am_rxn: str) -> tuple[dict[int, dict[int, float]], dict[int, di
         raise ValueError("Atom map numbers are not 1-to-1 between reactants and products.")
 
     # Count atoms received by molecule i from molecule j
-    rct_inlinks = {i: {j: 0.0 for j in range(len(pdts))} for i in range(len(rcts))}
     pdt_inlinks = {i: {j: 0.0 for j in range(len(rcts))} for i in range(len(pdts))}
     for amn in amns:
         rct_idx = amn_to_rct_idx[amn]
         pdt_idx = amn_to_pdt_idx[amn]
-        rct_inlinks[rct_idx][pdt_idx] += 1.0
         pdt_inlinks[pdt_idx][rct_idx] += 1.0
 
     # Normalize by number of atoms in reactants / products
-    for rct_idx, pdt_dict in rct_inlinks.items():
-        for pdt_idx, count in pdt_dict.items():
-            rct_inlinks[rct_idx][pdt_idx] = count / n_atoms_rcts[rct_idx]
-    
     for pdt_idx, rct_dict in pdt_inlinks.items():
         for rct_idx, count in rct_dict.items():
             pdt_inlinks[pdt_idx][rct_idx] = count / n_atoms_pdts[pdt_idx]
 
-    return rct_inlinks, pdt_inlinks
+    return pdt_inlinks
     
 @hydra.main(version_base=None, config_path="../configs", config_name="connect_reactions")
 def main(cfg: DictConfig):
@@ -96,11 +87,8 @@ def main(cfg: DictConfig):
     mass_links = {}
     for _, row in tqdm(mapped_rxns.iterrows(), total=len(mapped_rxns)):
         am_rxn = row['am_smarts']
-        rct_inlinks, pdt_inlinks = mass_balance(am_rxn)
-        mass_links[row['rxn_id']] = {
-            'rct_inlinks': rct_inlinks,
-            'pdt_inlinks': pdt_inlinks
-        }
+        pdt_inlinks = mass_balance(am_rxn)
+        mass_links[row['rxn_id']] = pdt_inlinks
 
     with open(Path(cfg.filepaths.interim_data) / "mass_links.json", 'w') as f:
         json.dump(mass_links, f)        

@@ -12,9 +12,6 @@ from tqdm import tqdm
 def construct_reaction_network(
         operator_connections: dict[int, dict],
         reactions: dict[int, dict],
-        similarity_connections:dict[int, dict] = {},
-        side_counts:dict[int, list] = {},
-        connect_nontrivial: bool = False,
         atom_lb: float = 0.0,
         coreactant_whitelist: Iterable = None,
         add_multi_mol_nodes: bool = False
@@ -31,10 +28,6 @@ def construct_reaction_network(
     nodes:list[tuple]
         Entries are (id:int, properties:dict)
     '''
-    if atom_lb != 0.0 and connect_nontrivial:
-        raise ValueError("Cannot enforce atom fraction lower bound if also including non-trivial similarity-based connections, which to not capture conservation of mass.")
-
-    fix_op_w_sim = [10540, 15237] # Known problems w/ operator-reaction mapping
     include_edge_props = ('smarts', 'rhea_ids', 'imt_rules')
     direction_from_side = lambda side : 0 if side == 'rct_inlinks' else 1 if side == 'pdt_inlinks' else print("Error side key not found")
 
@@ -46,26 +39,13 @@ def construct_reaction_network(
     tmp_edges = []
 
     # Add from operator_connections
-    for rid, rules in operator_connections.items():
-
-        if rid in fix_op_w_sim:
-            continue
-        
+    for rid, sides in operator_connections.items():
         smiles = [elt.split('.') for elt in reactions[rid]['smarts'].split('>>')]
 
-        # Remove unpaired coreactants
-        filtered_rules = defaultdict(lambda : defaultdict(dict))
-        for rule, sides in rules.items():
-            for side, adj_mat in sides.items():
-                direction = direction_from_side(side)
-                adj_mat = remove_unpaired_whitelist(adj_mat, direction, smiles, unpaired_whitelist)
-                filtered_rules[rule][side] = adj_mat
-
-        sel_adj_mats = handle_multiple_rules(filtered_rules) # Resolve cases with multiple rules
-
-        for side, adj_mat in sel_adj_mats.items():
-            direction = direction_from_side(side)
-            adj_mat = translate_operator_adj_mat(adj_mat, direction, smiles, smi2id)
+        for side, inlinks in sides.items():
+            direction = direction_from_side(side) # This is a binary switch to tranpose the adjacency matrix
+            inlinks = remove_unpaired_whitelist(inlinks, direction, smiles, unpaired_whitelist) # Remove unpaired coreactants
+            adj_mat = translate_operator_adj_mat(inlinks, direction, smiles, smi2id) # Convert nestes inlinks dict to adjacency matrix
             edge_props = { **{'rid': rid}, **{prop: reactions[rid][prop] for prop in include_edge_props} }
 
             if direction == 0:
@@ -99,7 +79,6 @@ def construct_reaction_network(
 
     return edges, nodes
         
-
 def remove_unpaired_whitelist(adj_mat: dict[int, dict[int, float]], direction: int, smiles: list[str], unpaired_whitelist: Iterable[str]):
     tmp = defaultdict(lambda : defaultdict(float))
     for i, inner in adj_mat.items():
@@ -118,66 +97,66 @@ def remove_unpaired_whitelist(adj_mat: dict[int, dict[int, float]], direction: i
 
     return tmp
 
-def handle_multiple_rules(rules: dict[str, dict]):
-    first_rule = next(iter(rules))
+# def handle_multiple_rules(rules: dict[str, dict]):
+#     first_rule = next(iter(rules))
 
-    if len(rules) == 1:
-        return rules[first_rule]
+#     if len(rules) == 1:
+#         return rules[first_rule]
     
-    exactly_same = True
-    directionally_same = True
+#     exactly_same = True
+#     directionally_same = True
 
-    rct_inlinks_check = defaultdict(set)
-    pdt_inlinks_check = defaultdict(set)
-    for sides in rules.values():
-        for side, outer in sides.items():
-            for i, inner in outer.items():
-                for j, atom_frac in inner.items():
-                    if side == 'rct_inlinks':
-                        rct_inlinks_check[(i, j)].add(atom_frac)
-                    elif side == 'pdt_inlinks':
-                        pdt_inlinks_check[(i, j)].add(atom_frac)
+#     rct_inlinks_check = defaultdict(set)
+#     pdt_inlinks_check = defaultdict(set)
+#     for sides in rules.values():
+#         for side, outer in sides.items():
+#             for i, inner in outer.items():
+#                 for j, atom_frac in inner.items():
+#                     if side == 'rct_inlinks':
+#                         rct_inlinks_check[(i, j)].add(atom_frac)
+#                     elif side == 'pdt_inlinks':
+#                         pdt_inlinks_check[(i, j)].add(atom_frac)
 
-    for v in rct_inlinks_check.values():
-        if len(v) > 1:
-            exactly_same = False
-            break
+#     for v in rct_inlinks_check.values():
+#         if len(v) > 1:
+#             exactly_same = False
+#             break
 
-    if exactly_same:
-        for v in pdt_inlinks_check.values():
-            if len(v) > 1:
-                exactly_same = False
-                break
+#     if exactly_same:
+#         for v in pdt_inlinks_check.values():
+#             if len(v) > 1:
+#                 exactly_same = False
+#                 break
 
-    if exactly_same:
-        return rules[first_rule]
-    else:
-        rct_inlinks_check = defaultdict(set)
-        pdt_inlinks_check = defaultdict(set)
-        for sides in rules.values():
-            for side, outer in sides.items():
-                for i, inner in outer.items():
-                    distro = list(inner.values())
-                    if side == 'rct_inlinks':
-                        rct_inlinks_check[i].add(np.argmax(distro))
-                    elif side == 'pdt_inlinks':
-                        pdt_inlinks_check[i].add(np.argmax(distro))
+#     if exactly_same:
+#         return rules[first_rule]
+#     else:
+#         rct_inlinks_check = defaultdict(set)
+#         pdt_inlinks_check = defaultdict(set)
+#         for sides in rules.values():
+#             for side, outer in sides.items():
+#                 for i, inner in outer.items():
+#                     distro = list(inner.values())
+#                     if side == 'rct_inlinks':
+#                         rct_inlinks_check[i].add(np.argmax(distro))
+#                     elif side == 'pdt_inlinks':
+#                         pdt_inlinks_check[i].add(np.argmax(distro))
 
-        for v in rct_inlinks_check.values():
-            if len(v) > 1:
-                directionally_same = False
-                break
+#         for v in rct_inlinks_check.values():
+#             if len(v) > 1:
+#                 directionally_same = False
+#                 break
 
-        if directionally_same:
-            for v in pdt_inlinks_check.values():
-                if len(v) > 1:
-                    directionally_same = False
-                    break
+#         if directionally_same:
+#             for v in pdt_inlinks_check.values():
+#                 if len(v) > 1:
+#                     directionally_same = False
+#                     break
 
-        if directionally_same:
-            return rules[first_rule]
+#         if directionally_same:
+#             return rules[first_rule]
         
-        return {}
+#         return {}
 
 def translate_operator_adj_mat(adj_mat: dict[int: dict[int, float]], direction: int, smiles: str, smi2id: dict[str, int]) -> list[dict[int: dict[int, float]]]:
     '''
@@ -343,69 +322,6 @@ def nested_adj_mat_to_edge_list(
             edges.append((j, i, props))
 
     return edges
-
-def connect_reaction_w_operator(reaction: str, operator: str, atom_map_to_rct_idx: dict) -> dict:
-    '''
-    Returns fraction of atoms in a reactant / product coming from a product / reactant, respectivley.
-    Expects the order of the reactants and products to both be aligned with the operator.
-
-    Args
-    ----
-    reaction: str
-        Reaction SMARTS
-    operator: str
-        Operator SMARTS
-    atom_map_to_rct_idx: dict
-        Maps atom map numbers from LHS of operator to reactant idx on LHS of operator
-
-    Returns
-    ------
-    rct_inlinks :dict
-        {rct_idx: {pdt_idx: fraction_atoms_from_pdt_idx}, }
-    pdt_inlinks: dict
-        {pdt_idx: {rct_idx: fraction_atoms_from_rct_idx}, }
-    
-    '''
-    operator = AllChem.ReactionFromSmarts(operator)
-    
-    rcts, pdts = [[smi for smi in side.split(".")] for side in reaction.split(">>")]
-    rcts = [Chem.MolFromSmiles(smi) for smi in rcts]
-
-    # Label rct atoms with rct idx
-    for i, r in enumerate(rcts):
-        for a in r.GetAtoms():
-            a.SetIntProp('rct_idx', i)
-
-    outputs = operator.RunReactants(rcts, maxProducts=10_000) # Apply operator
-    aligned_output = align_outputs_w_products(outputs, pdts)
-    if not aligned_output:
-        return {}, {}
-    
-    # Tally up which atoms from where
-    pdt_inlinks = {pdt_idx: {rct_idx: 0 for rct_idx in range(len(rcts))} for pdt_idx in range(len(pdts))} # {pdt_idx: {rct_idx: n_atoms_from}, }
-    rct_inlinks = {rct_idx: {pdt_idx: 0 for pdt_idx in range(len(pdts))} for rct_idx in range(len(rcts))} # {rct_idx: {pdt_idx: n_atoms_from}, }
-    for pdt_idx, o in enumerate(aligned_output):
-        for a in o.GetAtoms():
-            prop_dict = a.GetPropsAsDict()
-
-            if 'rct_idx' in prop_dict:
-                rct_idx = prop_dict['rct_idx']
-            else:
-                rct_idx =  atom_map_to_rct_idx[prop_dict['old_mapno']]
-
-            pdt_inlinks[pdt_idx][rct_idx] += 1
-            rct_inlinks[rct_idx][pdt_idx] += 1
-
-    # Normalize by total number of atoms
-    for pdt_idx, r_cts in pdt_inlinks.items():
-        for rct_idx, ct in r_cts.items():
-            pdt_inlinks[pdt_idx][rct_idx] = ct / aligned_output[pdt_idx].GetNumAtoms()
-
-    for rct_idx, p_cts in rct_inlinks.items():
-        for pdt_idx, ct in p_cts.items():
-            rct_inlinks[rct_idx][pdt_idx] = ct / rcts[rct_idx].GetNumAtoms()
-
-    return rct_inlinks, pdt_inlinks
 
 def fold_reactions(reactions: dict[str, dict]):
     reactions = {int(k): v for k,v in reactions.items()} # Cast keys to int
