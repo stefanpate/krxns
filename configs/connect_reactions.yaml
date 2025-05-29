@@ -4,6 +4,7 @@ defaults:
 
 mechinformed_mapped: mapped_sprhea_240310_v3_mapped_no_subunits_x_mechinformed_rules.parquet
 rc_plus_0_mapped: mapped_sprhea_240310_v3_mapped_no_subunits_x_rc_plus_0_rules.parquet
+sprhea: sprhea_240310_v3_mapped_no_subunits.json
 
 hydra:
   run:
