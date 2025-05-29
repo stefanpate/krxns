@@ -1,31 +1,29 @@
-[tool.poetry]
+[project]
 name = "krxns"
 version = "0.1.0"
-description = ""
-authors = ["stefanpate <stefanpate94@gmail.com>"]
+description = "Add your description here"
 readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "ergochemics",
+    "hydra-core>=1.3.2",
+    "ipykernel>=6.29.5",
+    "ipywidgets>=8.1.7",
+    "matplotlib>=3.10.3",
+    "networkx>=3.5",
+    "numpy>=2.2.6",
+    "pandas>=2.2.3",
+    "pyarrow>=20.0.0",
+    "rdkit>=2025.3.2",
+    "tqdm>=4.67.1",
+]
 
-[tool.poetry.dependencies]
-python = "^3.12"
-matplotlib = "^3.9.2"
-networkx = "^3.3"
-ipykernel = "^6.29.5"
-pandas = "^2.2.2"
-pyyaml = "^6.0.2"
-pathlib = "^1.0.1"
-tqdm = "^4.66.5"
-numpy = "<2.0"
-rdkit = "2024.3.2"
-ipywidgets = "^8.1.5"
-scipy = "^1.14.1"
-h5py = "^3.12.1"
-pyarrow = "^18.0.0"
-scikit-learn = "^1.5.2"
-chemprop = "^2.1.0"
-lightning = "^2.4.0"
-hydra-core = "^1.3.2"
+[dependency-groups]
+dev = [
+    "krxns",
+    "pytest>=8.3.5",
+]
 
-
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+[tool.uv.sources]
+ergochemics = { git = "https://github.com/stefanpate/ergochemics.git" }
+krxns = { workspace = true }
