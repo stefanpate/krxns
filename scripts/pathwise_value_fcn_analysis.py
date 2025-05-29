@@ -1,7 +1,7 @@
 from argparse import ArgumentParser
 from krxns.config import filepaths
 from krxns.utils import str2int
-from krxns.networks import SuperMultiDiGraph
+from krxns.network import SuperMultiDiGraph
 from krxns.net_construction import construct_reaction_network, extract_compounds
 from krxns.cheminfo import calc_mfp_matrix, tanimoto_similarity
 import json

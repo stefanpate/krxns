@@ -4,7 +4,7 @@ import pandas as pd
 from krxns.utils import str2int
 from krxns.config import filepaths
 from krxns.net_construction import construct_reaction_network
-from krxns.networks import SuperMultiDiGraph
+from krxns.network import SuperMultiDiGraph
 from sklearn.model_selection import StratifiedKFold
 
 parser = ArgumentParser(description="Store shortest path length dataset in chunks")

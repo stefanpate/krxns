@@ -96,7 +96,7 @@ def mass_balance(am_rxn: str, cpdid_rxn: tuple[list[int], list[int]]) -> dict[in
 
     return pdt_inlinks
     
-@hydra.main(version_base=None, config_path="../configs", config_name="connect_reactions")
+@hydra.main(version_base=None, config_path="../configs", config_name="process_reactions")
 def main(cfg: DictConfig):
     rc_0_mapped = pd.read_parquet(
         Path(cfg.filepaths.raw_data) / cfg.rc_plus_0_mapped

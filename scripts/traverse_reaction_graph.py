@@ -10,7 +10,7 @@ from krxns.utils import str2int
 from krxns.config import filepaths
 from krxns.cheminfo import calc_mfp_matrix, tanimoto_similarity
 from krxns.net_construction import construct_reaction_network
-from krxns.networks import SuperMultiDiGraph
+from krxns.network import SuperMultiDiGraph
 import numpy as np
 
 G = None # To be reaction network
