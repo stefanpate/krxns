@@ -89,26 +89,26 @@ def construct_reaction_network(
                 if (mass_frac + source_mass) >= 1.0 - ep:
                     edges.append(
                         (
-                            rct_id,
-                            pdt_id,
+                            int(rct_id),
+                            int(pdt_id),
                             {
-                                'reaction_id': rid,
+                                'reaction_id': int(rid),
                                 'mass_frac': mass_frac,
                                 'coreactants': this_sources,
-                                'coproducts': set(pdt_inlinks.keys()) - {pdt_id},
+                                'coproducts': set(int(k) for k in pdt_inlinks.keys()) - {int(pdt_id)},
                             }
                         )
                     )
 
-                    nodes[rct_id] = (rct_id, compounds.loc[compounds.id == rct_id, ['smiles', 'name']].to_dict())
-                    nodes[pdt_id] = (pdt_id, compounds.loc[compounds.id == pdt_id, ['smiles', 'name']].to_dict())
+                    nodes[int(rct_id)] = (int(rct_id), compounds.loc[compounds.id == int(rct_id), ['smiles', 'name']].to_dict('records')[0])
+                    nodes[int(pdt_id)] = (int(pdt_id), compounds.loc[compounds.id == int(pdt_id), ['smiles', 'name']].to_dict('records')[0])
 
-    return edges, nodes
+    return edges, list(nodes.values())
        
 if __name__ == '__main__':
     import json
     from pathlib import Path
-    root_dir = Path(__file__).parent.parent
+    root_dir = Path(__file__).parent.parent.parent
     kcs = pd.read_csv(root_dir / "data/interim/compounds.csv")
     with open(root_dir / "data/interim/mass_links.json", 'r') as f:
         mass_inlinks = json.load(f)
