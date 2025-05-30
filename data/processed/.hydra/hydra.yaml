@@ -113,12 +113,12 @@ hydra:
     - hydra.mode=RUN
     task: []
   job:
-    name: connect_reactions
+    name: process_reactions
     chdir: true
     override_dirname: ''
     id: ???
     num: ???
-    config_name: connect_reactions
+    config_name: process_reactions
     env_set: {}
     env_copy: []
     config:
@@ -142,6 +142,7 @@ hydra:
       provider: schema
     output_dir: /home/stef/krxns/data/processed
     choices:
+      sources: default
       filepaths: filepaths
       hydra/env: default
       hydra/callbacks: null

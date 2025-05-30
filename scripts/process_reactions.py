@@ -5,32 +5,44 @@ from pathlib import Path
 import hydra
 from omegaconf import DictConfig
 from rdkit import Chem
-import json
+from collections import defaultdict
+from ergochemics.standardize import standardize_smiles
+from functools import lru_cache
 
-def compound_id_rxn(rxn: str, smi_to_cpid: dict[str, int]) -> tuple[list[int], list[int]]:
+@lru_cache(maxsize=10000)
+def std_smi(smi: str) -> str:
+    return standardize_smiles(
+        smiles=smi,
+        do_canon_taut=False,
+        neutralization_method="simple",
+        quiet=True,
+        max_tautomers=100,
+    )
+
+def update_cpd_id_rxn(tmp_id_rxn: tuple[list[int], list[int]], tmp_id_to_cpd_id: dict[int, int]) -> tuple[list[int], list[int]]:
     '''
-    Converts a reaction string to a tuple of lists of compound ids for reactants and products.
+    Update compound ids in a reaction from temporary ids to compound ids.
 
     Args
     ----
-    rxn:str
-        Reaction string in the form of "R1.R2.R3>>P1.P2.P3"
-
-    smi_to_cpid:dict
-        Dictionary mapping smiles to compound ids.
-
+    tmp_id_rxn:tuple[list[int], list[int]]
+        Tuple containing two lists: reactant compound ids and product compound ids.
+        Must be in the same order as atom mapped reaction.
+    tmp_id_to_cpd_id:dict[int, int]
+        Mapping from temporary compound ids to compound ids.
+    
     Returns
     -------
-    tuple[list[int], list[int]]
-        Tuple containing two lists: reactant compound ids and product compound ids.
+    cpdid_rxn:tuple[list[int], list[int]]
+        Tuple containing two lists: reactant compound ids and product compound ids,
+        updated to use compound ids.
     '''
-    rcts, pdts = rxn.split('>>')
-    rct_ids = [smi_to_cpid[smi] for smi in rcts.split('.')]
-    pdt_ids = [smi_to_cpid[smi] for smi in pdts.split('.')]
-    
-    return rct_ids, pdt_ids
+    return (
+        [tmp_id_to_cpd_id[i] for i in tmp_id_rxn[0]],
+        [tmp_id_to_cpd_id[i] for i in tmp_id_rxn[1]]
+    )
 
-def mass_balance(am_rxn: str, cpdid_rxn: tuple[list[int], list[int]]) -> dict[int, dict[int, float]]:
+def get_mass_contributions(am_rxn: str, cpdid_rxn: tuple[list[int], list[int]]) -> dict[str, dict[int, dict[int, float]]]:
     '''
     Returns fraction of atoms in a reactant / product coming from a product / reactant, respectivley.
 
@@ -44,8 +56,20 @@ def mass_balance(am_rxn: str, cpdid_rxn: tuple[list[int], list[int]]) -> dict[in
     
     Returns
     -------
-    pdt_inlinks:dict
-        {pdt_id: {rct_id: fraction_atoms_from_rct_id}, }
+    dict[str, dict[int, dict[int, float]]]
+        With differently normalized mass contributions:
+        {
+            "rct_normed_mass_contrib": {
+                pdt_id: {
+                    rct_id: (atoms rct -> pdt) / tot_rct_atoms
+                }
+            },
+            "pdt_normed_mass_contrib": {
+                pdt_id: {
+                    rct_id: (atoms rct -> pdt) / tot_pdt_atoms
+                }
+            }
+        }
     '''
     rcts, pdts = [
         [Chem.MolFromSmiles(mol) for mol in side.split('.')]
@@ -81,20 +105,32 @@ def mass_balance(am_rxn: str, cpdid_rxn: tuple[list[int], list[int]]) -> dict[in
     amns = set(_amns) & set(amns_)
     if len(amns) != len(_amns) or len(amns) != len(amns_):
         raise ValueError("Atom map numbers are not 1-to-1 between reactants and products.")
+    
     # Count atoms received by molecule i from molecule j
-    pdt_inlinks = {i_id: {j_id: 0.0 for j_id in cpdid_rxn[0]} for i_id in cpdid_rxn[1]}
+    atom_counts = {i_id: {j_id: 0.0 for j_id in cpdid_rxn[0]} for i_id in cpdid_rxn[1]}
     for amn in amns:
         rct_id = cpdid_rxn[0][amn_to_rct_idx[amn]]
         pdt_id = cpdid_rxn[1][amn_to_pdt_idx[amn]]
-        pdt_inlinks[pdt_id][rct_id] += 1.0
+        atom_counts[pdt_id][rct_id] += 1.0
 
-    # Normalize by number of atoms in reactants / products
-    for pdt_id, rct_dict in pdt_inlinks.items():
-        tot_atoms = sum(rct_dict.values())
+    # Collect rct n atoms to normalize mass contributions
+    # in one returned dict
+    rct_id_to_n_atoms = {}
+    for rct, rct_id in zip(rcts, cpdid_rxn[0]):
+        rct_id_to_n_atoms[rct_id] = rct.GetNumAtoms()
+    
+    # Normalize by number of atoms in reactant / product
+    rct_normed_mass_contrib = {}
+    pdt_normed_mass_contrib = {}
+    for pdt_id, rct_dict in atom_counts.items():
+        rct_normed_mass_contrib[pdt_id] = {}
+        pdt_normed_mass_contrib[pdt_id] = {}
+        tot_atoms = sum(rct_dict.values()) # Total atoms in product
         for rct_id, count in rct_dict.items():
-            pdt_inlinks[pdt_id][rct_id] = count / tot_atoms
+            rct_normed_mass_contrib[pdt_id][rct_id] = count / rct_id_to_n_atoms[rct_id]
+            pdt_normed_mass_contrib[pdt_id][rct_id] = count / tot_atoms
 
-    return pdt_inlinks
+    return {"rct_normed_mass_contrib": rct_normed_mass_contrib, "pdt_normed_mass_contrib": pdt_normed_mass_contrib}
     
 @hydra.main(version_base=None, config_path="../configs", config_name="process_reactions")
 def main(cfg: DictConfig):
@@ -117,44 +153,69 @@ def main(cfg: DictConfig):
     smi2name = {smi: name for entry in sprhea.values() for smi, name in entry['smi2name'].items()}
     del sprhea
 
-    # TODO: Standardize (incl tautomer form) all smiles in these reactions, preseriving the atom maping ans so on
-    # TODO: Ultimately, handle cpd smiles canonicalization in pre-processing
-
     # Extract compounds from reactions
-    compounds = set()
-    for _, row in mapped_rxns.iterrows():
-        for side in row['smarts'].split('>>'):
+    compounds = defaultdict(set)
+    smi_to_tmp_id = {}
+    mapped_rxns["cpd_id_rxn"] = None
+    for idx, row in tqdm(mapped_rxns.iterrows(), total=len(mapped_rxns), desc="Extracting and standardizing compounds"):
+        cpd_id_rxn = [[], []]
+        for i, side in enumerate(row['smarts'].split('>>')):
             for smi in side.split('.'):
-                compounds.add(smi)
+                smi = std_smi(smi)
+                
+                if smi not in smi_to_tmp_id:
+                    smi_to_tmp_id[smi] = len(smi_to_tmp_id)
 
-    compounds = sorted(compounds)
-    compounds_df = pd.DataFrame({
-        'id': range(len(compounds)),
-        'smiles': compounds,
-        'name': [smi2name.get(smi, '') for smi in compounds],
-    })
+                cpd_id_rxn[i].append(smi_to_tmp_id[smi])
+                compounds[smi].add(row['rxn_id'])
+        
+        mapped_rxns.at[idx, 'cpd_id_rxn'] = tuple(cpd_id_rxn)
+
+    compounds = {k: len(v) for k, v in compounds.items()}
+    compounds = sorted(compounds.items())
+    smiles, rxn_counts = zip(*compounds)
+    compounds_df = pd.DataFrame(
+        {
+            'id': range(len(compounds)),
+            'smiles': smiles,
+            'name': [smi2name.get(smi, '') for smi in smiles],
+            'rxn_count': rxn_counts
+        }
+    )
+    compounds_df["n_atoms"] = compounds_df['smiles'].apply(
+        lambda smi: Chem.MolFromSmiles(smi).GetNumAtoms()
+    )
 
     compounds_df.to_csv(
         Path(cfg.filepaths.interim_data) / "compounds.csv",
         index=False
     )
 
-    # Add compound id reactions to enable canonical compound index in ultimate network
+    # Save default set of sources
+    sources = compounds_df[compounds_df["name"].isin(cfg.sources.source_names)]
+    sources.to_csv(
+        Path(cfg.filepaths.interim_data) / "default_sources.csv",
+        index=False
+    )
+
+    # Update ids in cpd id reaction to lexicographically sorted smiles ones
     smi_to_cpid = dict(zip(compounds_df['smiles'], compounds_df['id']))
-    mapped_rxns["cpdid_rxn"] = mapped_rxns["smarts"].apply(
-        lambda rxn: compound_id_rxn(rxn, smi_to_cpid)
+    tmp_id_to_cpd_id = {v: smi_to_cpid[k] for k, v in smi_to_tmp_id.items()}
+    mapped_rxns["cpd_id_rxn"] = mapped_rxns["cpd_id_rxn"].apply(
+        lambda x: update_cpd_id_rxn(x, tmp_id_to_cpd_id)
     )
 
     # Get mass weighted inlink dicts 
-    mass_links = {}
-    for _, row in tqdm(mapped_rxns.iterrows(), total=len(mapped_rxns)):
+    mass_contributions = {}
+    for _, row in tqdm(mapped_rxns.iterrows(), total=len(mapped_rxns), desc="Calculating mass contributions"):
         am_rxn = row['am_smarts']
-        cpdid_rxn = row['cpdid_rxn']
-        pdt_inlinks = mass_balance(am_rxn, cpdid_rxn)
-        mass_links[row['rxn_id']] = pdt_inlinks
+        cpdid_rxn = row['cpd_id_rxn']
+        atom_counts = get_mass_contributions(am_rxn, cpdid_rxn)
+        atom_counts["am_smarts"] = am_rxn # Also sneak am smarts in there for convenience
+        mass_contributions[row['rxn_id']] = atom_counts
 
-    with open(Path(cfg.filepaths.interim_data) / "mass_links.json", 'w') as f:
-        json.dump(mass_links, f)        
+    with open(Path(cfg.filepaths.interim_data) / "mass_contributions.json", 'w') as f:
+        json.dump(mass_contributions, f)        
 
 if __name__ == '__main__':
     main()

@@ -1,0 +1,22 @@
+id,smiles,name,rxn_count,n_atoms
+1262,C,methane,4,1
+1852,CC(=O)SCCNC(=O)CCNC(=O)C(O)C(C)(C)COP(=O)(O)OP(=O)(O)OCC1OC(n2cnc3c(N)ncnc32)C(O)C1OP(=O)(O)O,acetyl-CoA,366,51
+1910,CC(C)(COP(=O)(O)OP(=O)(O)OCC1OC(n2cnc3c(N)ncnc32)C(O)C1OP(=O)(O)O)C(O)C(=O)NCCC(=O)NCCS,CoA,1870,48
+5179,C[S+](CCC(N)C(=O)O)CC1OC(n2cnc3c(N)ncnc32)C(O)C1O,S-adenosyl-L-methionine,742,27
+5327,N,NH4(+),442,1
+5423,NC(=O)C1=CN(C2OC(COP(=O)(O)OP(=O)(O)OCC3OC(n4cnc5c(N)ncnc54)C(O)C3O)C(O)C2O)C=CC1,NADH,1064,44
+5426,NC(=O)C1=CN(C2OC(COP(=O)(O)OP(=O)(O)OCC3OC(n4cnc5c(N)ncnc54)C(OP(=O)(O)O)C3O)C(O)C2O)C=CC1,NADPH,1205,48
+5467,NC(=O)c1ccc[n+](C2OC(COP(=O)(O)OP(=O)(O)OCC3OC(n4cnc5c(N)ncnc54)C(O)C3O)C(O)C2O)c1,NAD(+),1137,44
+5468,NC(=O)c1ccc[n+](C2OC(COP(=O)(O)OP(=O)(O)OCC3OC(n4cnc5c(N)ncnc54)C(OP(=O)(O)O)C3O)C(O)C2O)c1,NADP(+),1215,48
+5931,Nc1ncnc2c1ncn2C1OC(COP(=O)(O)O)C(O)C1O,AMP,606,23
+5949,Nc1ncnc2c1ncn2C1OC(COP(=O)(O)OP(=O)(O)O)C(O)C1O,ADP,917,27
+5972,Nc1ncnc2c1ncn2C1OC(COP(=O)(O)OP(=O)(O)OP(=O)(O)O)C(O)C1O,ATP,1423,31
+5983,Nc1ncnc2c1ncn2C1OC(CSCCC(N)C(=O)O)C(O)C1O,S-adenosyl-L-homocysteine,720,26
+5990,O,H2O,4599,1
+6516,O=C=O,CO2,847,3
+6612,O=O,O2,1280,2
+6615,O=P(O)(O)O,phosphate,996,5
+6672,O=P(O)(O)OP(=O)(O)O,diphosphate,1122,9
+6780,O=c1ccn(C2OC(COP(=O)(O)OP(=O)(O)O)C(O)C2O)c(=O)[nH]1,UDP,636,25
+6870,OO,H2O2,404,2
+6917,S,hydrogen sulfide,18,1

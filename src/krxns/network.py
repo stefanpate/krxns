@@ -57,18 +57,32 @@ class SuperMultiDiGraph(nx.MultiDiGraph):
         return node_path, edge_path
 
 def construct_reaction_network(
-        mass_inlinks: dict[str, dict[str, dict[str, float]]],
+        mass_contributions: dict[str, str or dict[str, dict[str, float]]],
         compounds: pd.DataFrame,
-        sources: Iterable[str] = [],
+        sources: Iterable[int] = [],
     ):
     '''
     Args
     ----
-    mass_inlinks:dict
-        {reaction_id: {product_id: {reactant_id: fraction_atoms_from_reactant}, ...}, ...}
-        Fraction of atoms in a product coming from a reactant.
+    mass_contributions:dict[str, str or dict[str, dict[str, float]]]
+        With differently normalized mass contributions:
+        {
+            "am_smarts": reaction,
+            "rct_normed_mass_contrib": {
+                pdt_id: {
+                    rct_id: (atoms rct -> pdt) / tot_rct_atoms
+                }
+            },
+            "pdt_normed_mass_contrib": {
+                pdt_id: {
+                    rct_id: (atoms rct -> pdt) / tot_pdt_atoms
+                }
+            }
+        }
     compounds:pd.DataFrame
         DataFrame containing compound information with 'id', 'smiles' and 'name' columns.
+    sources:Iterable[int]
+        List of source compound IDs to consider for mass balance. If empty, all compounds are considered.
     
     Returns
     -------
@@ -79,29 +93,44 @@ def construct_reaction_network(
     '''
     edges = []
     nodes = {}
-    ep = 5e-3
-    for rid, pdt_inlinks in mass_inlinks.items():
-        for pdt_id, rcts in pdt_inlinks.items():
+    ep = 1e-2
+    for rid, entry in mass_contributions.items():
+        rid = int(rid)
+        am_smarts = entry.get('am_smarts', None)
+        rct_normed_mass_contrib = entry.get('rct_normed_mass_contrib', {})
+        pdt_normed_mass_contrib = entry.get('pdt_normed_mass_contrib', {})
+        for pdt_id, rcts in pdt_normed_mass_contrib.items():
+            pdt_id = int(pdt_id)
+            rcts = {int(k): v for k, v in rcts.items()}
             this_sources = set(u for u in rcts if u in sources)
+            
+            # Reaction must not require more rcts than |sources| + 1
+            if len(this_sources) < len(rcts) -1:
+                break
+            
             for rct_id, mass_frac in rcts.items():
                 source_mass = sum(rcts[s] for s in this_sources - {rct_id})
 
-                if (mass_frac + source_mass) >= 1.0 - ep:
+                # Reactant must contribute some mass to product on its own and
+                # together with sources must contribue all the mass (minus fudge factor)
+                if mass_frac > 0 and (mass_frac + source_mass) >= 1.0 - ep:
                     edges.append(
                         (
-                            int(rct_id),
-                            int(pdt_id),
+                            rct_id,
+                            pdt_id,
                             {
-                                'reaction_id': int(rid),
-                                'mass_frac': mass_frac,
+                                'reaction_id': rid,
+                                'pdt_normed_mass_frac': mass_frac,
+                                'rct_normed_mass_frac': rct_normed_mass_contrib[str(pdt_id)][str(rct_id)],
+                                'am_smarts': am_smarts,
                                 'coreactants': this_sources,
-                                'coproducts': set(int(k) for k in pdt_inlinks.keys()) - {int(pdt_id)},
+                                'coproducts': set(int(k) for k in pdt_normed_mass_contrib.keys()) - {pdt_id},
                             }
                         )
                     )
 
-                    nodes[int(rct_id)] = (int(rct_id), compounds.loc[compounds.id == int(rct_id), ['smiles', 'name']].to_dict('records')[0])
-                    nodes[int(pdt_id)] = (int(pdt_id), compounds.loc[compounds.id == int(pdt_id), ['smiles', 'name']].to_dict('records')[0])
+                    nodes[rct_id] = (rct_id, compounds.loc[compounds.id == rct_id, ['smiles', 'name']].to_dict('records')[0])
+                    nodes[pdt_id] = (pdt_id, compounds.loc[compounds.id == pdt_id, ['smiles', 'name']].to_dict('records')[0])
 
     return edges, list(nodes.values())
        
@@ -111,10 +140,10 @@ if __name__ == '__main__':
     root_dir = Path(__file__).parent.parent.parent
     kcs = pd.read_csv(root_dir / "data/interim/compounds.csv")
     with open(root_dir / "data/interim/mass_links.json", 'r') as f:
-        mass_inlinks = json.load(f)
+        mass_contributions = json.load(f)
 
     edges, nodes = construct_reaction_network(
-        mass_inlinks=mass_inlinks,
+        mass_contributions=mass_contributions,
         compounds=kcs,
         sources=[]
     )

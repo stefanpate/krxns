@@ -1,5 +1,6 @@
 defaults:
   - filepaths: filepaths
+  - sources: default
   - _self_
 
 mechinformed_mapped: mapped_sprhea_240310_v3_mapped_no_subunits_x_mechinformed_rules.parquet
