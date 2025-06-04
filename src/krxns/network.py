@@ -57,9 +57,11 @@ class SuperMultiDiGraph(nx.MultiDiGraph):
         return node_path, edge_path
 
 def construct_reaction_network(
-        mass_contributions: dict[str, str or dict[str, dict[str, float]]],
+        mass_contributions: dict[str, str | dict[str, dict[str, float]]],
         compounds: pd.DataFrame,
         sources: Iterable[int] = [],
+        rnmc_lb: float = 0,
+        pnmc_lb: float = 0
     ):
     '''
     Args
@@ -83,6 +85,10 @@ def construct_reaction_network(
         DataFrame containing compound information with 'id', 'smiles' and 'name' columns.
     sources:Iterable[int]
         List of source compound IDs to consider for mass balance. If empty, all compounds are considered.
+    rnmc_lb:float
+        Lower bound for reactant normalized mass contribution from reactant.
+    pnmc_lb:float
+        Lower bound for product normalized mass contribution from reactant.
     
     Returns
     -------
@@ -105,23 +111,25 @@ def construct_reaction_network(
             this_sources = set(u for u in rcts if u in sources)
             
             # Reaction must not require more rcts than |sources| + 1
-            if len(this_sources) < len(rcts) -1:
+            if len(this_sources) < len(rcts) - 1:
                 break
             
-            for rct_id, mass_frac in rcts.items():
-                source_mass = sum(rcts[s] for s in this_sources - {rct_id})
+            for rct_id, pnmc in rcts.items():
+                source_mass = sum(rcts[s] for s in this_sources - {rct_id}) # Mass contribution from designated sources
+                rnmc = rct_normed_mass_contrib[str(pdt_id)][str(rct_id)]
 
-                # Reactant must contribute some mass to product on its own and
-                # together with sources must contribue all the mass (minus fudge factor)
-                if mass_frac > 0 and (mass_frac + source_mass) >= 1.0 - ep:
+                # Reactant must contribute more than lower bounds on both pdt- and rct- 
+                # normed mass contributions (at least >0 by default) and together
+                # w/ the designated sources must contribue all the mass (minus fudge factor)
+                if pnmc > pnmc_lb and rnmc > rnmc_lb and (pnmc + source_mass) >= 1.0 - ep:
                     edges.append(
                         (
                             rct_id,
                             pdt_id,
                             {
                                 'reaction_id': rid,
-                                'pdt_normed_mass_frac': mass_frac,
-                                'rct_normed_mass_frac': rct_normed_mass_contrib[str(pdt_id)][str(rct_id)],
+                                'pdt_normed_mass_frac': pnmc,
+                                'rct_normed_mass_frac': rnmc,
                                 'am_smarts': am_smarts,
                                 'coreactants': this_sources,
                                 'coproducts': set(int(k) for k in pdt_normed_mass_contrib.keys()) - {pdt_id},
