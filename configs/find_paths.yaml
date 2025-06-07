@@ -1,0 +1,21 @@
+defaults:
+  - filepaths: filepaths
+  - _self_
+
+starters: ccm_aa
+targets: qty_c_cpds
+sources: default_sources
+kcs: compounds
+starters_as_sources: True
+pnmc_lb: 0.33
+rnmc_lb: 0.33
+processes: 2
+
+hydra:
+  run:
+    dir: ${filepaths.processed_data}
+  job:
+    chdir: True
+  sweep:
+    dir: ${filepaths.processed_data}
+    subdir: .

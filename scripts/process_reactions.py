@@ -13,7 +13,7 @@ from functools import lru_cache
 def std_smi(smi: str) -> str:
     return standardize_smiles(
         smiles=smi,
-        do_canon_taut=True,
+        do_canon_taut=False,
         neutralization_method="simple",
         quiet=True,
         max_tautomers=100,
