@@ -31,7 +31,9 @@ def process_pair(pair: tuple[str, str]) -> dict[str, any]:
 
     if not tidx:
         return {}
-    elif sidx == tidx:
+    
+    tidx = tidx[0]  # Nodes should be unique in smiles, so we take the first one
+    if sidx == tidx:
         return {}
     elif sidx not in shortest_paths or tidx not in shortest_paths[sidx]:
         return {}
@@ -91,30 +93,33 @@ def main(cfg: DictConfig) -> None:
     G = SuperMultiDiGraph()
     G.add_nodes_from(nodes)
     G.add_edges_from(edges)
-    print(f"Constructed reaction network with {G.number_of_nodes} nodes and {G.number_of_edges} edges.")
+    print(f"Constructed reaction network with {G.number_of_nodes()} nodes and {G.number_of_edges()} edges.")
 
-    # Process reactions
+    # Process pairs
     pairs = list(product(addtl_sources, targets["smiles"].tolist()))
     chunksize = max(1, int(len(pairs) / cfg.processes))
     with ProcessPoolExecutor(max_workers=cfg.processes, initializer=initializer, initargs=(standardize_smiles, G)) as executor:
         print("Processing w/ context: ", executor._mp_context)
-        paths = tuple(executor.map(process_pair, pairs, chunksize=chunksize))
-        # paths = list(
-        #     tqdm(
-        #         executor.map(process_pair, pairs, chunksize=chunksize),
-        #         total=len(pairs),
-        #         desc="Procesing pairs"
-        #     )
-        # )
+        paths = list(
+            tqdm(
+                executor.map(process_pair, pairs, chunksize=chunksize),
+                total=len(pairs),
+                desc="Procesing pairs"
+            )
+        )
+
+    # # TODO: remove. jsut for debugging
+    # initializer(standardize_smiles, G)
+    # print("Processing reactions in main process")
+    # paths = []
+    # for pr in tqdm(pairs, desc="Processing pairs", total=len(pairs)): 
+    #     paths.append(process_pair(pr))
 
     paths = [p for p in paths if p]  # Filter out empty results
     paths_df = pd.DataFrame(paths)
     paths_df.to_parquet(
         f"known_paths_{cfg.starters}_to_{cfg.targets}_pnmc_lb_{cfg.pnmc_lb}_rnmc_lb_{cfg.rnmc_lb}_sources_{cfg.sources}_s_as_sources_{cfg.starters_as_sources}.parquet",
     )
-
-    
-
 
 if __name__ == "__main__":
     main()
