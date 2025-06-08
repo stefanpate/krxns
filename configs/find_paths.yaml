@@ -3,7 +3,7 @@ defaults:
   - _self_
 
 starters: ccm_aa
-targets: qty_c_cpds
+targets: bottle_targets_24_retro
 sources: default_sources
 kcs: compounds
 starters_as_sources: True
