@@ -61,7 +61,8 @@ def construct_reaction_network(
         compounds: pd.DataFrame,
         sources: Iterable[int] = [],
         rnmc_lb: float = 0,
-        pnmc_lb: float = 0
+        pnmc_lb: float = 0,
+        tot_mass_lb: float = 1.0,
     ):
     '''
     Args
@@ -89,6 +90,8 @@ def construct_reaction_network(
         Lower bound for reactant normalized mass contribution from reactant.
     pnmc_lb:float
         Lower bound for product normalized mass contribution from reactant.
+    tot_mass_lb:float
+        Lower bound for total mass contribution from reactant and sources.
     
     Returns
     -------
@@ -99,7 +102,7 @@ def construct_reaction_network(
     '''
     edges = []
     nodes = {}
-    ep = 1e-2
+    ep = 1e-3
     for rid, entry in mass_contributions.items():
         rid = int(rid)
         am_smarts = entry.get('am_smarts', None)
@@ -110,10 +113,6 @@ def construct_reaction_network(
             rcts = {int(k): v for k, v in rcts.items()}
             this_sources = set(u for u in rcts if u in sources)
             
-            # Reaction must not require more rcts than |sources| + 1
-            if len(this_sources) < len(rcts) - 1:
-                break
-            
             for rct_id, pnmc in rcts.items():
                 source_mass = sum(rcts[s] for s in this_sources - {rct_id}) # Mass contribution from designated sources
                 rnmc = rct_normed_mass_contrib[str(pdt_id)][str(rct_id)]
@@ -121,7 +120,7 @@ def construct_reaction_network(
                 # Reactant must contribute more than lower bounds on both pdt- and rct- 
                 # normed mass contributions (at least >0 by default) and together
                 # w/ the designated sources must contribue all the mass (minus fudge factor)
-                if pnmc > pnmc_lb and rnmc > rnmc_lb and (pnmc + source_mass) >= 1.0 - ep:
+                if pnmc >= pnmc_lb and rnmc >= rnmc_lb and (pnmc + source_mass) >= tot_mass_lb - ep:
                     edges.append(
                         (
                             rct_id,
@@ -147,8 +146,21 @@ if __name__ == '__main__':
     from pathlib import Path
     root_dir = Path(__file__).parent.parent.parent
     kcs = pd.read_csv(root_dir / "data/interim/compounds.csv")
-    with open(root_dir / "data/interim/mass_links.json", 'r') as f:
+    sources = pd.read_csv(root_dir / "data/interim/default_sources.csv")
+    sources = sources['id'].tolist()
+    with open(root_dir / "data/interim/mass_contributions.json", 'r') as f:
         mass_contributions = json.load(f)
+
+    mass_contributions = {k: v for k, v in mass_contributions.items() if k == '1148'}
+
+    edges, nodes = construct_reaction_network(
+        mass_contributions=mass_contributions,
+        compounds=kcs,
+        sources=sources,
+        pnmc_lb=0.33,
+        rnmc_lb=0.33,
+        tot_mass_lb=0.7
+    )
 
     edges, nodes = construct_reaction_network(
         mass_contributions=mass_contributions,
