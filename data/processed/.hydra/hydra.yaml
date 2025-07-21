@@ -111,16 +111,14 @@ hydra:
   overrides:
     hydra:
     - hydra.mode=RUN
-    task:
-    - targets=bottle_targets_24_retro
-    - processes=3
+    task: []
   job:
-    name: find_paths
+    name: process_reactions
     chdir: true
-    override_dirname: processes=3,targets=bottle_targets_24_retro
+    override_dirname: ''
     id: ???
     num: ???
-    config_name: find_paths
+    config_name: process_reactions
     env_set: {}
     env_copy: []
     config:
@@ -131,7 +129,7 @@ hydra:
   runtime:
     version: 1.3.2
     version_base: '1.3'
-    cwd: /home/stef/krxns/scripts
+    cwd: /home/stef/krxns
     config_sources:
     - path: hydra.conf
       schema: pkg
@@ -144,6 +142,7 @@ hydra:
       provider: schema
     output_dir: /home/stef/krxns/data/processed
     choices:
+      sources: default
       filepaths: filepaths
       hydra/env: default
       hydra/callbacks: null

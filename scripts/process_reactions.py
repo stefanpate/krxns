@@ -6,18 +6,6 @@ import hydra
 from omegaconf import DictConfig
 from rdkit import Chem
 from collections import defaultdict
-from ergochemics.standardize import standardize_smiles
-from functools import lru_cache
-
-@lru_cache(maxsize=10000)
-def std_smi(smi: str) -> str:
-    return standardize_smiles(
-        smiles=smi,
-        do_canon_taut=False,
-        neutralization_method="simple",
-        quiet=True,
-        max_tautomers=100,
-    )
 
 def update_cpd_id_rxn(tmp_id_rxn: tuple[list[int], list[int]], tmp_id_to_cpd_id: dict[int, int]) -> tuple[list[int], list[int]]:
     '''
@@ -146,12 +134,11 @@ def main(cfg: DictConfig):
     overlap = rc_0_mapped.rxn_id.isin(mechinformed_mapped.rxn_id)
     mapped_rxns = pd.concat([mechinformed_mapped, rc_0_mapped[~overlap]], ignore_index=True)
 
-    # Get smi2name out of sprhea json
-    with open(Path(cfg.filepaths.raw_data) / cfg.sprhea, 'r') as f:
-        sprhea = json.load(f)
-
-    smi2name = {smi: name for entry in sprhea.values() for smi, name in entry['smi2name'].items()}
-    del sprhea
+    # Get smi2name mapping
+    kcs = pd.read_parquet(
+        Path(cfg.filepaths.raw_data) / cfg.known_compounds
+    )
+    smi2name = dict(zip(kcs['smiles'], kcs['name']))
 
     # Extract compounds from reactions
     compounds = defaultdict(set)
@@ -161,7 +148,6 @@ def main(cfg: DictConfig):
         cpd_id_rxn = [[], []]
         for i, side in enumerate(row['smarts'].split('>>')):
             for smi in side.split('.'):
-                smi = std_smi(smi)
                 
                 if smi not in smi_to_tmp_id:
                     smi_to_tmp_id[smi] = len(smi_to_tmp_id)
