@@ -4,6 +4,9 @@ from typing import Any
 from copy import deepcopy
 from typing import Iterable
 import pandas as pd
+from dataclasses import dataclass, field
+from collections import deque
+from itertools import product
 
 class SuperMultiDiGraph(nx.MultiDiGraph):
     def __init__(self, incoming_graph_data=None, multigraph_input=None, **attr):
@@ -140,8 +143,202 @@ def construct_reaction_network(
                     nodes[pdt_id] = (pdt_id, compounds.loc[compounds.id == pdt_id, ['smiles', 'name']].to_dict('records')[0])
 
     return edges, list(nodes.values())
+
+@dataclass
+class SyntheticTree:
+    '''
+    Represents a retrosynthetic tree
+
+    Attributes
+    ----------
+    root: int
+        Node index of the root of the tree, typically the target compound.
+    generations: list[dict[int, str]]
+        A list of dictionaries representing each generation in the tree.
+        Each dictionary maps compound node indices to the reaction ID that produced them. Value
+        is None for compounds that have not been produced by any reaction.
+    leaves: list[tuple[int, int]]
+        A list of tuples where each tuple contains a node index and its generation index.
+        Represents the current leaves of the tree, i.e., compounds that have not been further reacted
+        or transformed. The generation index is required to disambiguate leaves of the same compound
+        that are at different generations of the tree.
+    n_gens: int
+        Returns the number of generations in the synthetic tree.
+    n_leaves: int
+        Returns the number of leaves in the synthetic tree, i.e., compounds that have not been further reacted
+        or transformed.
+    
+    Methods
+    -------
+    copy() -> SyntheticTree
+        Returns a deep copy of the SyntheticTree instance.
+    grow(leaf: tuple[str, int], rxn_id: str, rcts: list[str])
+        Grows the synthetic tree by adding a new reaction at the specified leaf.
+        The leaf is a tuple containing the compound ID and its generation index.
+        The reaction ID and the list of reactants are provided to update the tree.
+    '''
+    root: int
+    generations: list[dict[int, str]] = field(default_factory=list)
+    _leaves: list[tuple[int, int]] = field(default_factory=list)
+
+    def copy(self):
+        return SyntheticTree(
+            root=self.root,
+            generations=deepcopy(self.generations),
+            _leaves=deepcopy(self._leaves)
+        )
+    
+    def __post_init__(self):
+        if len(self.generations) == 0:
+            self.generations = [{self.root: None}]
+            self._leaves.append((self.root, 0))
+
+    
+    def grow(self, leaf: tuple[str, int], rxn_id: str, rcts: list[str]):
+        if leaf not in self._leaves:
+            raise ValueError(f"Leaf {leaf} not in tree")
+        
+        self.generations[leaf[1]][leaf[0]] = rxn_id # Tracks which reaction produced this leaf
+        self._leaves.remove(leaf) # Remove leaf from leaves list now that it has been produced
+        
+        if leaf[1] == self.n_gens:
+            self.generations.append({}) # Ensures new generation created if needed
+
+        for rct in rcts:
+            self.generations[leaf[1] + 1][rct] = None
+            self._leaves.append((rct, leaf[1] + 1))
+
+    @property
+    def leaves(self) -> list[tuple[str, int]]:
+        return deepcopy(self._leaves)  
+        
+    @property
+    def n_gens(self) -> int:
+        return len(self.generations) - 1
+    
+    @property
+    def n_leaves(self) -> int:
+        return len(self._leaves)
+
+def enumerate_synthetic_trees(target: int, sources: set[int], G: nx.Graph, max_depth: int, max_leaves: int, rnmc_lb: float = 0.1) -> list[SyntheticTree]:
+    '''
+    Enumerates synthetic trees for a given target compound in a reaction network.
+
+    Args
+    ----
+    target: int
+        Node index of the target compound for which to enumerate synthetic trees.
+    sources: set[int]
+        Node indices of the source compounds that can be used in the synthesis.
+    G: nx.Graph
+        The reaction network graph. Must contain nodes with 'tot_rnmc' and 'grouped_predecessors' attributes.
+    max_depth: int
+        Maximum depth of the synthetic tree.
+    max_leaves: int
+        Maximum number of leaves in the synthetic tree.
+
+    Returns
+    -------
+    list[SyntheticTree]
+        A list of synthetic trees enumerated from the reaction network.
+    '''
+    synthetic_trees = []
+    tree = SyntheticTree(root=target)
+    stack = deque()
+    stack.append(tree)
+    while stack:
+        tree = stack.pop()
+        
+        if tree.n_gens > max_depth or tree.n_leaves > max_leaves: # Exclusion criteria
+            continue
+        
+        if all([leaf[0] in sources for leaf in tree.leaves]): # Inclusion criteria. Compare just compound node index to sources
+            synthetic_trees.append(tree)
+            continue
+
+        # Each expansion step must make a choice of reaction for each leaf
+        # First collect reaction choices for each leaf
+        leaf_choices = {}
+        for leaf in tree.leaves:
+            if leaf[0] in sources: # No need to grow tree from sources
+                continue
+
+            leaf_choices[leaf] = []
+
+            for rxn, tot_rnmc in G.nodes[leaf[0]]['tot_rnmc'].items():
+                if tot_rnmc < rnmc_lb: # Exclude reaction on atom economic grounds
+                    continue
+
+                leaf_choices[leaf].append(rxn)
+        
+        # Make a choice for each leaf and stack new trees
+        choices = product(*leaf_choices.values())
+        for choice in choices:
+            new_tree = tree.copy()
+            for leaf, rxn in zip(leaf_choices.keys(), choice):
+                rcts = list(G.nodes[leaf[0]]['grouped_predecessors'][rxn])
+                new_tree.grow(leaf, rxn, rcts)
+            stack.append(new_tree)
+
+    return synthetic_trees
        
 if __name__ == '__main__':
+    nodes = [
+        (0, {'grouped_predecessors': {'R1': [1,], 'R2': [2,], 'R3': [3, 4]}, 'tot_rnmc': {'R1': 1.0, 'R2': 1.0, 'R3': 1.0}}),
+        (1, {'grouped_predecessors': {'R4': [5,], 'R5': [6, 7]}, 'tot_rnmc': {'R4': 1.0, 'R5': 1.0}}),
+        (2, {'grouped_predecessors': {}, 'tot_rnmc': {}}),
+        (3, {'grouped_predecessors': {'R6': [8, 9]}, 'tot_rnmc': {'R6': 0.8}}),
+        (4, {'grouped_predecessors': {'R7': [10,]}, 'tot_rnmc': {'R7': 1.0}}),
+        (5, {'grouped_predecessors': {}, 'tot_rnmc': {}}),
+        (6, {'grouped_predecessors': {}, 'tot_rnmc': {}}),
+        (7, {'grouped_predecessors': {'R8': [11,]}, 'tot_rnmc': {'R8': 0.9}}),
+        (8, {'grouped_predecessors': {'R9': [12,]}, 'tot_rnmc': {'R9': 1.0}}),
+        (9, {'grouped_predecessors': {'R10': [13,]}, 'tot_rnmc': {'R10': 0.95}}),
+        (10, {'grouped_predecessors': {}, 'tot_rnmc': {}}),
+        (11, {'grouped_predecessors': {}, 'tot_rnmc': {}}),
+        (12, {'grouped_predecessors': {'R11': [14,]}, 'tot_rnmc': {'R11': 0.85}}),
+        (13, {'grouped_predecessors': {}, 'tot_rnmc': {}}),
+        (14, {'grouped_predecessors': {}, 'tot_rnmc': {}}),
+    ]
+
+    edges = [
+        (1, 0, {'rid': 'R1'}),
+        (2, 0, {'rid': 'R2'}),
+        (3, 0, {'rid': 'R3'}),
+        (4, 0, {'rid': 'R3'}),
+        (5, 1, {'rid': 'R4'}),
+        (6, 1, {'rid': 'R5'}),
+        (7, 1, {'rid': 'R5'}),
+        (8, 3, {'rid': 'R6'}),
+        (9, 3, {'rid': 'R6'}),
+        (10, 4, {'rid': 'R7'}),
+        (11, 7, {'rid': 'R8'}),
+        (12, 8, {'rid': 'R9'}),
+        (13, 9, {'rid': 'R10'}),
+        (14, 12, {'rid': 'R11'}),
+
+    ]
+
+    target = 0
+    sources = {6, 10, 11, 13, 14}
+    max_leaves = 5
+    max_depth = 5
+    
+    G = nx.MultiDiGraph()
+    G.add_nodes_from(nodes)
+    G.add_edges_from(edges)
+
+    synthetic_trees = enumerate_synthetic_trees(
+        target=target,
+        sources=sources,
+        G=G,
+        max_depth=max_depth,
+        max_leaves=max_leaves,
+        rnmc_lb=0.1
+    )
+    print()
+
+
     import json
     from pathlib import Path
     root_dir = Path(__file__).parent.parent.parent
