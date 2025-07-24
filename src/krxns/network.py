@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from collections import deque
 from itertools import product
 
-class SuperMultiDiGraph(nx.MultiDiGraph):
+class ReactionNetwork(nx.MultiDiGraph):
     def __init__(self, incoming_graph_data=None, multigraph_input=None, **attr):
         super().__init__(incoming_graph_data, multigraph_input, **attr)
     
@@ -121,7 +121,7 @@ def construct_reaction_network(
                 rnmc = rct_normed_mass_contrib[str(pdt_id)][str(rct_id)]
 
                 # Reactant must contribute more than lower bounds on both pdt- and rct- 
-                # normed mass contributions (at least >0 by default) and together
+                # normed mass contributions and together
                 # w/ the designated sources must contribue all the mass (minus fudge factor)
                 if pnmc >= pnmc_lb and rnmc >= rnmc_lb and (pnmc + source_mass) >= tot_mass_lb - ep:
                     edges.append(
@@ -133,8 +133,8 @@ def construct_reaction_network(
                                 'pdt_normed_mass_frac': pnmc,
                                 'rct_normed_mass_frac': rnmc,
                                 'am_smarts': am_smarts,
-                                'coreactants': this_sources,
-                                'coproducts': set(int(k) for k in pdt_normed_mass_contrib.keys()) - {pdt_id},
+                                'coreactants': tuple(this_sources),
+                                'coproducts': tuple(set(int(k) for k in pdt_normed_mass_contrib.keys()) - {pdt_id}),
                             }
                         )
                     )
@@ -220,7 +220,7 @@ class SyntheticTree:
     def n_leaves(self) -> int:
         return len(self._leaves)
 
-def enumerate_synthetic_trees(target: int, sources: set[int], G: nx.Graph, max_depth: int, max_leaves: int, rnmc_lb: float = 0.1) -> list[SyntheticTree]:
+def enumerate_synthetic_trees(target: int, sources: set[int], G: ReactionNetwork, max_depth: int, max_leaves: int, rnmc_lb: float = 0.1) -> list[SyntheticTree]:
     '''
     Enumerates synthetic trees for a given target compound in a reaction network.
 
