@@ -12,6 +12,7 @@ class ReactionNetwork(nx.MultiDiGraph):
     def __init__(self, incoming_graph_data=None, multigraph_input=None, **attr):
         super().__init__(incoming_graph_data, multigraph_input, **attr)
     
+    # TODO: Remember why this is important
     def add_edges_from(self, ebunch_to_add, **attr):
         multi_keys =  super().add_edges_from(ebunch_to_add, **attr)
         ij2k = {}
@@ -59,90 +60,90 @@ class ReactionNetwork(nx.MultiDiGraph):
 
         return node_path, edge_path
 
-def construct_reaction_network(
-        mass_contributions: dict[str, str | dict[str, dict[str, float]]],
-        compounds: pd.DataFrame,
-        sources: Iterable[int] = [],
-        rnmc_lb: float = 0,
-        pnmc_lb: float = 0,
-        tot_mass_lb: float = 1.0,
-    ):
-    '''
-    Args
-    ----
-    mass_contributions:dict[str, str or dict[str, dict[str, float]]]
-        With differently normalized mass contributions:
-        {
-            "am_smarts": reaction,
-            "rct_normed_mass_contrib": {
-                pdt_id: {
-                    rct_id: (atoms rct -> pdt) / tot_rct_atoms
-                }
-            },
-            "pdt_normed_mass_contrib": {
-                pdt_id: {
-                    rct_id: (atoms rct -> pdt) / tot_pdt_atoms
-                }
-            }
-        }
-    compounds:pd.DataFrame
-        DataFrame containing compound information with 'id', 'smiles' and 'name' columns.
-    sources:Iterable[int]
-        List of source compound IDs to consider for mass balance. If empty, all compounds are considered.
-    rnmc_lb:float
-        Lower bound for reactant normalized mass contribution from reactant.
-    pnmc_lb:float
-        Lower bound for product normalized mass contribution from reactant.
-    tot_mass_lb:float
-        Lower bound for total mass contribution from reactant and sources.
+# def construct_reaction_network(
+#         mass_contributions: dict[str, str | dict[str, dict[str, float]]],
+#         compounds: pd.DataFrame,
+#         sources: Iterable[int] = [],
+#         rnmc_lb: float = 0,
+#         pnmc_lb: float = 0,
+#         tot_mass_lb: float = 1.0,
+#     ):
+#     '''
+#     Args
+#     ----
+#     mass_contributions:dict[str, str or dict[str, dict[str, float]]]
+#         With differently normalized mass contributions:
+#         {
+#             "am_smarts": reaction,
+#             "rct_normed_mass_contrib": {
+#                 pdt_id: {
+#                     rct_id: (atoms rct -> pdt) / tot_rct_atoms
+#                 }
+#             },
+#             "pdt_normed_mass_contrib": {
+#                 pdt_id: {
+#                     rct_id: (atoms rct -> pdt) / tot_pdt_atoms
+#                 }
+#             }
+#         }
+#     compounds:pd.DataFrame
+#         DataFrame containing compound information with 'id', 'smiles' and 'name' columns.
+#     sources:Iterable[int]
+#         List of source compound IDs to consider for mass balance. If empty, all compounds are considered.
+#     rnmc_lb:float
+#         Lower bound for reactant normalized mass contribution from reactant.
+#     pnmc_lb:float
+#         Lower bound for product normalized mass contribution from reactant.
+#     tot_mass_lb:float
+#         Lower bound for total mass contribution from reactant and sources.
     
-    Returns
-    -------
-    edges:list[tuple]
-        Entries are (from:int, to:int, properties:dict)
-    nodes:list[tuple]
-        Entries are (id:int, properties:dict)
-    '''
-    edges = []
-    nodes = {}
-    ep = 1e-3
-    for rid, entry in mass_contributions.items():
-        rid = int(rid)
-        am_smarts = entry.get('am_smarts', None)
-        rct_normed_mass_contrib = entry.get('rct_normed_mass_contrib', {})
-        pdt_normed_mass_contrib = entry.get('pdt_normed_mass_contrib', {})
-        for pdt_id, rcts in pdt_normed_mass_contrib.items():
-            pdt_id = int(pdt_id)
-            rcts = {int(k): v for k, v in rcts.items()}
-            this_sources = set(u for u in rcts if u in sources)
+#     Returns
+#     -------
+#     edges:list[tuple]
+#         Entries are (from:int, to:int, properties:dict)
+#     nodes:list[tuple]
+#         Entries are (id:int, properties:dict)
+#     '''
+#     edges = []
+#     nodes = {}
+#     ep = 1e-3
+#     for rid, entry in mass_contributions.items():
+#         rid = int(rid)
+#         am_smarts = entry.get('am_smarts', None)
+#         rct_normed_mass_contrib = entry.get('rct_normed_mass_contrib', {})
+#         pdt_normed_mass_contrib = entry.get('pdt_normed_mass_contrib', {})
+#         for pdt_id, rcts in pdt_normed_mass_contrib.items():
+#             pdt_id = int(pdt_id)
+#             rcts = {int(k): v for k, v in rcts.items()}
+#             this_sources = set(u for u in rcts if u in sources)
             
-            for rct_id, pnmc in rcts.items():
-                source_mass = sum(rcts[s] for s in this_sources - {rct_id}) # Mass contribution from designated sources
-                rnmc = rct_normed_mass_contrib[str(pdt_id)][str(rct_id)]
+#             for rct_id, pnmc in rcts.items():
+#                 source_mass = sum(rcts[s] for s in this_sources - {rct_id}) # Mass contribution from designated sources
+#                 rnmc = rct_normed_mass_contrib[str(pdt_id)][str(rct_id)]
 
-                # Reactant must contribute more than lower bounds on both pdt- and rct- 
-                # normed mass contributions and together
-                # w/ the designated sources must contribue all the mass (minus fudge factor)
-                if pnmc >= pnmc_lb and rnmc >= rnmc_lb and (pnmc + source_mass) >= tot_mass_lb - ep:
-                    edges.append(
-                        (
-                            rct_id,
-                            pdt_id,
-                            {
-                                'reaction_id': rid,
-                                'pdt_normed_mass_frac': pnmc,
-                                'rct_normed_mass_frac': rnmc,
-                                'am_smarts': am_smarts,
-                                'coreactants': tuple(this_sources),
-                                'coproducts': tuple(set(int(k) for k in pdt_normed_mass_contrib.keys()) - {pdt_id}),
-                            }
-                        )
-                    )
+#                 # Reactant must contribute more than lower bounds on both pdt- and rct- 
+#                 # normed mass contributions and together
+#                 # w/ the designated sources must contribue all the mass (minus fudge factor)
+#                 if pnmc >= pnmc_lb and rnmc >= rnmc_lb and (pnmc + source_mass) >= tot_mass_lb - ep:
+#                     edges.append(
+#                         (
+#                             rct_id,
+#                             pdt_id,
+#                             {
+#                                 'reaction_id': rid,
+#                                 'pdt_normed_mass_frac': pnmc,
+#                                 'rct_normed_mass_frac': rnmc,
+#                                 'am_smarts': am_smarts,
+#                                 'coreactants': tuple(this_sources),
+#                                 'coproducts': tuple(set(int(k) for k in pdt_normed_mass_contrib.keys()) - {pdt_id}),
+#                             }
+#                         )
+#                     )
 
-                    nodes[rct_id] = (rct_id, compounds.loc[compounds.id == rct_id, ['smiles', 'name']].to_dict('records')[0])
-                    nodes[pdt_id] = (pdt_id, compounds.loc[compounds.id == pdt_id, ['smiles', 'name']].to_dict('records')[0])
+#                     nodes[rct_id] = (rct_id, compounds.loc[compounds.id == rct_id, ['smiles', 'name']].to_dict('records')[0])
+#                     nodes[pdt_id] = (pdt_id, compounds.loc[compounds.id == pdt_id, ['smiles', 'name']].to_dict('records')[0])
 
-    return edges, list(nodes.values())
+#     return edges, list(nodes.values())
 
 @dataclass
 class SyntheticTree:

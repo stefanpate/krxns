@@ -6,6 +6,8 @@ import hydra
 from omegaconf import DictConfig
 from rdkit import Chem
 from collections import defaultdict
+import networkx as nx
+from krxns.network import ReactionNetwork
 
 def update_cpd_id_rxn(tmp_id_rxn: tuple[list[int], list[int]], tmp_id_to_cpd_id: dict[int, int]) -> tuple[list[int], list[int]]:
     '''
@@ -119,6 +121,85 @@ def get_mass_contributions(am_rxn: str, cpdid_rxn: tuple[list[int], list[int]]) 
             pdt_normed_mass_contrib[pdt_id][rct_id] = count / tot_atoms
 
     return {"rct_normed_mass_contrib": rct_normed_mass_contrib, "pdt_normed_mass_contrib": pdt_normed_mass_contrib}
+
+# TODO: Migrate this to a class method that acts on single reaction
+def construct_network(mass_contributions: dict[str, str | dict[str, dict[str, float]]], compounds: pd.DataFrame) -> tuple[list[tuple], list[tuple]]:
+    '''
+    Args
+    ----
+    mass_contributions:dict[str, str or dict[str, dict[str, float]]]
+        With differently normalized mass contributions:
+        {
+            "am_smarts": reaction,
+            "rct_normed_mass_contrib": {
+                pdt_id: {
+                    rct_id: (atoms rct -> pdt) / tot_rct_atoms
+                }
+            },
+            "pdt_normed_mass_contrib": {
+                pdt_id: {
+                    rct_id: (atoms rct -> pdt) / tot_pdt_atoms
+                }
+            }
+        }
+    compounds:pd.DataFrame
+        DataFrame containing compound information with 'id', 'smiles' and 'name' columns.
+    
+    Returns
+    -------
+    edges:list[tuple]
+        Entries are (from:int, to:int, properties:dict)
+    nodes:list[tuple]
+        Entries are (id:int, properties:dict)
+    '''
+    edges = []
+    nodes = {}
+    for rid, entry in mass_contributions.items():
+        am_smarts = entry.get('am_smarts', None)
+        rct_normed_mass_contrib = entry.get('rct_normed_mass_contrib', {})
+        pdt_normed_mass_contrib = entry.get('pdt_normed_mass_contrib', {})
+        for pdt_id, rcts in pdt_normed_mass_contrib.items():
+            pdt_id = int(pdt_id)
+            rcts = {int(k): v for k, v in rcts.items()}
+
+            grouped_predecessors = []
+            tot_rnmc = 0
+            for rct_id, pnmc in rcts.items():
+                grouped_predecessors.append(rct_id)
+                rnmc = rct_normed_mass_contrib[pdt_id][rct_id]
+                tot_rnmc += rnmc
+                edges.append(
+                    (
+                        rct_id,
+                        pdt_id,
+                        {
+                            'reaction_id': rid,
+                            'pdt_normed_mass_frac': pnmc,
+                            'rct_normed_mass_frac': rnmc,
+                            'am_smarts': am_smarts,
+                        }
+                    )
+                )
+
+                
+                if rct_id not in nodes:
+                    rct_attrs = compounds.loc[compounds.id == rct_id, ['smiles', 'name']].to_dict('records')[0]
+                    rct_attrs['source'] = False
+                    rct_attrs['grouped_predecessors'] = {}
+                    rct_attrs['tot_rnmc'] = {}
+                    nodes[rct_id] = (rct_id, rct_attrs)
+                
+                if pdt_id in nodes:
+                    nodes[pdt_id][1]['grouped_predecessors'][rid] = grouped_predecessors
+                    nodes[pdt_id][1]['tot_rnmc'][rid] = tot_rnmc
+                else:
+                    pdt_attrs = compounds.loc[compounds.id == pdt_id, ['smiles', 'name']].to_dict('records')[0]
+                    pdt_attrs['grouped_predecessors'] = {rid: grouped_predecessors}
+                    pdt_attrs['tot_rnmc'] = {rid: tot_rnmc}
+                    pdt_attrs['source'] = False
+                    nodes[pdt_id] = (pdt_id, pdt_attrs)
+
+    return edges, list(nodes.values())
     
 @hydra.main(version_base=None, config_path="../configs", config_name="process_reactions")
 def main(cfg: DictConfig):
@@ -200,8 +281,14 @@ def main(cfg: DictConfig):
         atom_counts["am_smarts"] = am_rxn # Also sneak am smarts in there for convenience
         mass_contributions[row['rxn_id']] = atom_counts
 
-    with open(Path(cfg.filepaths.interim_data) / "mass_contributions.json", 'w') as f:
-        json.dump(mass_contributions, f)        
+    edges, nodes = construct_network(mass_contributions, compounds_df)
+    G = ReactionNetwork()
+    G.add_nodes_from(nodes)
+    G.add_edges_from(edges)
+
+    data = nx.node_link_data(G, edges="edges")
+    with open(Path(cfg.filepaths.processed_data) / "known_reaction_network.json", "w") as f:
+        json.dump(data, f)
 
 if __name__ == '__main__':
     main()

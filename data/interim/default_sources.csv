@@ -1,6 +1,5 @@
 id,smiles,name,rxn_count,n_atoms
 1416,C,methane,6,1
-2238,CC(=O)SCCNC(=O)CCNC(=O)C(O)C(C)(C)COP(=O)(O)OP(=O)(O)OCC1OC(n2cnc3c(N)ncnc32)C(O)C1OP(=O)(O)O,acetyl-CoA,555,51
 2308,CC(C)(COP(=O)(O)OP(=O)(O)OCC1OC(n2cnc3c(N)ncnc32)C(O)C1OP(=O)(O)O)C(O)C(=O)NCCC(=O)NCCS,CoA,2327,48
 6707,C[S+](CCC(N)C(=O)O)CC1OC(n2cnc3c(N)ncnc32)C(O)C1O,S-adenosyl-L-methionine,1144,27
 6946,N,NH4(+),687,1
@@ -18,5 +17,6 @@ id,smiles,name,rxn_count,n_atoms
 8681,O=P(O)(O)O,phosphate,1324,5
 8741,O=P(O)(O)OP(=O)(O)O,diphosphate,1389,9
 8906,O=c1ccn(C2OC(COP(=O)(O)OP(=O)(O)O)C(O)C2O)c(=O)[nH]1,UDP,964,25
+8908,O=c1ccn(C2OC(COP(=O)(O)OP(=O)(O)OC3OC(CO)C(O)C(O)C3O)C(O)C2O)c(=O)[nH]1,UDP-alpha-D-glucose,570,36
 9044,OO,H2O2,588,2
 9106,S,hydrogen sulfide,40,1
