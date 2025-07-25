@@ -85,12 +85,33 @@ class ReactionNetwork(nx.MultiDiGraph):
         node_indices = {data['smiles']: idx for idx, data in self.nodes(data=True)} # Collect SMILES: idx mapping for all existing nodes
         mass_contributions = get_mass_contributions(am_rxn)
         for pdt_smi, rcts in mass_contributions['pdt_normed_mass_contrib'].items():
-            pdt_id = node_indices.get(pdt_smi, len(self.nodes))
-            rcts = {k: v for k, v in rcts.items()}
+            
+            # Update collection of node indices if this is a new one
+            if pdt_smi not in node_indices:
+                node_indices[pdt_smi] = len(node_indices)
+            
+            pdt_id = node_indices[pdt_smi]
 
+            # Create new node with all but the grouped predecessors
+            if pdt_id not in self.nodes:
+                self.add_node(
+                    pdt_id,
+                    smiles = pdt_smi,
+                    name = smi2name.get(pdt_smi, "Unknown"),
+                    source = False,
+                    grouped_predecessors = {},
+                    tot_rnmc = {rid: mass_contributions['tot_rct_normed_mass_contrib'][pdt_smi]},
+                )
+            else: # Fill in tot_rnmc for exisiting node, new rxn
+                self.nodes[pdt_id]['tot_rnmc'][rid] = mass_contributions['tot_rct_normed_mass_contrib'][pdt_smi]
+           
             grouped_predecessors = []
             for rct_smi, pnmc in rcts.items():
-                rct_id = node_indices.get(rct_smi, len(self.nodes))
+                # Update collection of node indices if this is a new one
+                if rct_smi not in node_indices:
+                    node_indices[rct_smi] = len(node_indices)
+
+                rct_id = node_indices[rct_smi]
                 grouped_predecessors.append(rct_id)
                 rnmc = mass_contributions['rct_normed_mass_contrib'][pdt_smi][rct_smi]
                 
@@ -101,25 +122,19 @@ class ReactionNetwork(nx.MultiDiGraph):
                     rct_attrs['tot_rnmc'] = {}
                     self.add_node(rct_id, **rct_attrs)
                 
-                if pdt_id in self.nodes:
-                    self.nodes[pdt_id]['grouped_predecessors'][rid] = grouped_predecessors
-                    self.nodes[pdt_id]['tot_rnmc'][rid] = mass_contributions['tot_rct_normed_mass_contrib'][pdt_smi]
-                else:
-                    pdt_attrs = {'smiles': pdt_smi, 'name': smi2name.get(pdt_smi, "Unknown")}
-                    pdt_attrs['grouped_predecessors'] = {rid: grouped_predecessors}
-                    pdt_attrs['tot_rnmc'] = {rid: mass_contributions['tot_rct_normed_mass_contrib'][pdt_smi]}
-                    pdt_attrs['source'] = False
-                    self.add_node(pdt_id, **pdt_attrs)
                 self.add_edge(
                     rct_id,
                     pdt_id,
                     **{
                         'reaction_id': rid,
-                        'pdt_normed_mass_frac': pnmc,
-                        'rct_normed_mass_frac': rnmc,
+                        'pnmc': pnmc,
+                        'rnmc': rnmc,
                         'am_smarts': am_rxn,
                     }
                 )
+
+            # Finally add grouped predecessors
+            self.nodes[pdt_id]['grouped_predecessors'][rid] = grouped_predecessors
     
     def set_sources(self, smiles: Iterable[str] = None, indices: Iterable[int] = None) -> None:
         '''
@@ -175,7 +190,7 @@ def get_mass_contributions(am_rxn: str) -> dict[str, dict[int, dict[int, float]]
                 }
             }
             "tot_rct_normed_mass_contrib": {
-                pdt_smi: \sum(rnmc) / \sum(rct atoms)
+                pdt_smi: sum(rnmc) / sum(rct atoms)
             }
         }
 

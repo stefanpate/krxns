@@ -6,7 +6,7 @@ import hydra
 from omegaconf import DictConfig
 import networkx as nx
 from krxns.network import ReactionNetwork
-   
+
 
 @hydra.main(version_base=None, config_path="../configs", config_name="construct_known_reaction_network")
 def main(cfg: DictConfig):
