@@ -8,12 +8,32 @@ from collections import deque
 from itertools import product
 from rdkit import Chem
 from typing import Iterable
+import pathlib
+import json
 # from ergochemics.noseque import hash_compound, hash_reaction # TODO
 
 class ReactionNetwork(nx.MultiDiGraph):
-    def __init__(self, incoming_graph_data=None, multigraph_input=None, **attr):
+    def __init__(self, incoming_graph_data=None, multigraph_input=None, ij2k={}, **attr):
+        self.ij2k = ij2k
         super().__init__(incoming_graph_data, multigraph_input, **attr)
-        self.ij2k = {}
+
+    @classmethod
+    def from_json(cls, fp: pathlib.Path | str) -> "ReactionNetwork":
+        
+        with open(fp, 'r') as f:
+            data = json.load(f)
+
+        ij2k = data.pop('ij2k', {})
+        ij2k = {tuple(map(int, k.split(','))): v for k, v in ij2k.items()}  # Convert keys back to tuples
+        G = nx.node_link_graph(data, edges="edges")
+        return cls(incoming_graph_data=G, ij2k=ij2k)
+    
+    def to_json(self, fp: pathlib.Path | str) -> None:
+        data = nx.node_link_data(self, edges="edges")
+        data['ij2k'] = {','.join(map(str, k)): v for k, v in self.ij2k.items()}  # Convert ij2k to a serializable format
+        
+        with open(fp, "w") as f:
+            json.dump(data, f)
 
     def add_node(self, node, **attr):
         # TODO: switch to hashing
@@ -498,28 +518,4 @@ if __name__ == '__main__':
     print()
 
 
-    import json
-    from pathlib import Path
-    root_dir = Path(__file__).parent.parent.parent
-    kcs = pd.read_csv(root_dir / "data/interim/compounds.csv")
-    sources = pd.read_csv(root_dir / "data/interim/default_sources.csv")
-    sources = sources['id'].tolist()
-    with open(root_dir / "data/interim/mass_contributions.json", 'r') as f:
-        mass_contributions = json.load(f)
-
-    mass_contributions = {k: v for k, v in mass_contributions.items() if k == '1148'}
-
-    edges, nodes = construct_reaction_network(
-        mass_contributions=mass_contributions,
-        compounds=kcs,
-        sources=sources,
-        pnmc_lb=0.33,
-        rnmc_lb=0.33,
-        tot_mass_lb=0.7
-    )
-
-    edges, nodes = construct_reaction_network(
-        mass_contributions=mass_contributions,
-        compounds=kcs,
-        sources=[]
-    )
+    G = ReactionNetwork.from_json('/home/stef/krxns/data/processed/known_reaction_network.json')

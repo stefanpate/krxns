@@ -1,10 +1,8 @@
-import json
 import pandas as pd
 from tqdm import tqdm
 from pathlib import Path
 import hydra
 from omegaconf import DictConfig
-import networkx as nx
 from krxns.network import ReactionNetwork
 
 
@@ -36,13 +34,10 @@ def main(cfg: DictConfig):
     )
 
     G = ReactionNetwork()
-    # Append to network
     for _, row in tqdm(mapped_rxns.iterrows(), total=len(mapped_rxns), desc="Adding reactions to network"):
-        G.add_reaction(am_rxn=row['am_smarts'], rid=row['rxn_id'], smi2name=smi2name)
+        G.add_reaction(am_rxn=row['am_smarts'], rid=row['rxn_id'], smi2name=smi2name) # Append to network
 
-    data = nx.node_link_data(G, edges="edges")
-    with open(Path(cfg.filepaths.processed_data) / "known_reaction_network.json", "w") as f:
-        json.dump(data, f)
+    G.to_json(Path(cfg.filepaths.processed_data) / "known_reaction_network.json") # Save
 
 if __name__ == '__main__':
     main()
