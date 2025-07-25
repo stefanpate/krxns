@@ -2,30 +2,39 @@ import networkx as nx
 from networkx.exception import NetworkXNoPath
 from typing import Any
 from copy import deepcopy
-from typing import Iterable
 import pandas as pd
 from dataclasses import dataclass, field
 from collections import deque
 from itertools import product
+from rdkit import Chem
+from typing import Iterable
+# from ergochemics.noseque import hash_compound, hash_reaction # TODO
 
 class ReactionNetwork(nx.MultiDiGraph):
     def __init__(self, incoming_graph_data=None, multigraph_input=None, **attr):
         super().__init__(incoming_graph_data, multigraph_input, **attr)
+        self.ij2k = {}
+
+    def add_node(self, node, **attr):
+        # TODO: switch to hashing
+        if type(node) is not int:
+            raise TypeError("Node index must be an integer.")
+        return super().add_node(node, **attr)
     
-    # TODO: Remember why this is important
-    def add_edges_from(self, ebunch_to_add, **attr):
-        multi_keys =  super().add_edges_from(ebunch_to_add, **attr)
-        ij2k = {}
-        for edge, k in zip(ebunch_to_add, multi_keys):
-            ij = edge[:2]
-            if ij in ij2k:
-                ij2k[ij].append(k)
-            else:
-                ij2k[ij] = [k]
+    def add_edge(self, u_for_edge, v_for_edge, key=None, **attr):
+        # TODO: switch to hashing
+        if type(u_for_edge) is not int or type(v_for_edge) is not int:
+            raise TypeError("Node indices must be integers.")
+        key = super().add_edge(u_for_edge, v_for_edge, key=key, **attr)
+        ij = (u_for_edge, v_for_edge)
+        if ij in self.ij2k:
+            self.ij2k[ij].append(key)
+        else:
+            self.ij2k[ij] = [key]
 
-        self.ij2k = ij2k
+        return key
 
-    def get_nodes_by_prop(self, prop:str, value:Any) -> list[int]:
+    def get_nodes_by_prop(self, prop: str, value: Any) -> list[int]:
         return [x for x, y in self.nodes(data=True) if y[prop] == value]
     
     def get_edges_between(self, source:int, target:int, k:int = None):
@@ -59,91 +68,225 @@ class ReactionNetwork(nx.MultiDiGraph):
             edge_path.append(pruned.get_edges_between(node_path[i], node_path[i+1]))
 
         return node_path, edge_path
-
-# def construct_reaction_network(
-#         mass_contributions: dict[str, str | dict[str, dict[str, float]]],
-#         compounds: pd.DataFrame,
-#         sources: Iterable[int] = [],
-#         rnmc_lb: float = 0,
-#         pnmc_lb: float = 0,
-#         tot_mass_lb: float = 1.0,
-#     ):
-#     '''
-#     Args
-#     ----
-#     mass_contributions:dict[str, str or dict[str, dict[str, float]]]
-#         With differently normalized mass contributions:
-#         {
-#             "am_smarts": reaction,
-#             "rct_normed_mass_contrib": {
-#                 pdt_id: {
-#                     rct_id: (atoms rct -> pdt) / tot_rct_atoms
-#                 }
-#             },
-#             "pdt_normed_mass_contrib": {
-#                 pdt_id: {
-#                     rct_id: (atoms rct -> pdt) / tot_pdt_atoms
-#                 }
-#             }
-#         }
-#     compounds:pd.DataFrame
-#         DataFrame containing compound information with 'id', 'smiles' and 'name' columns.
-#     sources:Iterable[int]
-#         List of source compound IDs to consider for mass balance. If empty, all compounds are considered.
-#     rnmc_lb:float
-#         Lower bound for reactant normalized mass contribution from reactant.
-#     pnmc_lb:float
-#         Lower bound for product normalized mass contribution from reactant.
-#     tot_mass_lb:float
-#         Lower bound for total mass contribution from reactant and sources.
     
-#     Returns
-#     -------
-#     edges:list[tuple]
-#         Entries are (from:int, to:int, properties:dict)
-#     nodes:list[tuple]
-#         Entries are (id:int, properties:dict)
-#     '''
-#     edges = []
-#     nodes = {}
-#     ep = 1e-3
-#     for rid, entry in mass_contributions.items():
-#         rid = int(rid)
-#         am_smarts = entry.get('am_smarts', None)
-#         rct_normed_mass_contrib = entry.get('rct_normed_mass_contrib', {})
-#         pdt_normed_mass_contrib = entry.get('pdt_normed_mass_contrib', {})
-#         for pdt_id, rcts in pdt_normed_mass_contrib.items():
-#             pdt_id = int(pdt_id)
-#             rcts = {int(k): v for k, v in rcts.items()}
-#             this_sources = set(u for u in rcts if u in sources)
+    def add_reaction(self, am_rxn: str, rid: str | int, smi2name: dict[str, str]) -> None:
+        '''
+        Adds a reaction to the reaction network.
+
+        Args
+        ----
+        am_rxn: str
+            Atom-mapped reaction string in the form of "R1.R2.R3>>P1.P2.P3".
+        rid: str | int
+            Reaction ID, can be a string or an integer.
+        smi2name: dict[str, str]
+            Mapping from SMILES to compound names.
+        '''
+        node_indices = {data['smiles']: idx for idx, data in self.nodes(data=True)} # Collect SMILES: idx mapping for all existing nodes
+        mass_contributions = get_mass_contributions(am_rxn)
+        for pdt_smi, rcts in mass_contributions['pdt_normed_mass_contrib'].items():
+            pdt_id = node_indices.get(pdt_smi, len(self.nodes))
+            rcts = {k: v for k, v in rcts.items()}
+
+            grouped_predecessors = []
+            for rct_smi, pnmc in rcts.items():
+                rct_id = node_indices.get(rct_smi, len(self.nodes))
+                grouped_predecessors.append(rct_id)
+                rnmc = mass_contributions['rct_normed_mass_contrib'][pdt_smi][rct_smi]
+                
+                if rct_id not in self.nodes:
+                    rct_attrs = {'smiles': rct_smi, 'name': smi2name.get(rct_smi, "Unknown")}
+                    rct_attrs['source'] = False
+                    rct_attrs['grouped_predecessors'] = {}
+                    rct_attrs['tot_rnmc'] = {}
+                    self.add_node(rct_id, **rct_attrs)
+                
+                if pdt_id in self.nodes:
+                    self.nodes[pdt_id]['grouped_predecessors'][rid] = grouped_predecessors
+                    self.nodes[pdt_id]['tot_rnmc'][rid] = mass_contributions['tot_rct_normed_mass_contrib'][pdt_smi]
+                else:
+                    pdt_attrs = {'smiles': pdt_smi, 'name': smi2name.get(pdt_smi, "Unknown")}
+                    pdt_attrs['grouped_predecessors'] = {rid: grouped_predecessors}
+                    pdt_attrs['tot_rnmc'] = {rid: mass_contributions['tot_rct_normed_mass_contrib'][pdt_smi]}
+                    pdt_attrs['source'] = False
+                    self.add_node(pdt_id, **pdt_attrs)
+                self.add_edge(
+                    rct_id,
+                    pdt_id,
+                    **{
+                        'reaction_id': rid,
+                        'pdt_normed_mass_frac': pnmc,
+                        'rct_normed_mass_frac': rnmc,
+                        'am_smarts': am_rxn,
+                    }
+                )
+    
+    def set_sources(self, smiles: Iterable[str] = None, indices: Iterable[int] = None) -> None:
+        '''
+        Sets the source compounds in the reaction network.
+
+        Args
+        ----
+        smiles: Iterable[str], optional
+            An iterable of SMILES strings representing the source compounds.
+        indices: Iterable[int], optional
+            An iterable of node indices representing the source compounds.
+        
+        Raises
+        ------
+        ValueError
+            If neither `smiles` nor `indices` are provided.
+        '''
+        if smiles is None and indices is None:
+            raise ValueError("Provide either smiles or indices to set sources.")
+        
+        if smiles is not None:
+            indices = [self.get_nodes_by_prop('smiles', smi) for smi in smiles]
+        
+        for idx in indices:
+            if idx in self.nodes:
+                self.nodes[idx]['source'] = True
+            else:
+                raise ValueError(f"Node index {idx} not found in the network.")
+
+def get_mass_contributions(am_rxn: str) -> dict[str, dict[int, dict[int, float]]]:
+    '''
+    Returns fraction of atoms in a reactant / product coming from a product / reactant, respectively
+    plus a summed rct normed mass contribution for each product.
+
+    Args
+    ----
+    am_rxn:str
+        Atom-mapped reaction string in the form of "R1.R2.R3>>P1.P2.P3"
+    
+    Returns
+    -------
+    dict[str, dict[int, dict[int, float]]]
+        With differently normalized mass contributions:
+        {
+            "rct_normed_mass_contrib": {
+                pdt_smi: {
+                    rct_smi: (atoms rct -> pdt) / tot_rct_atoms
+                }
+            },
+            "pdt_normed_mass_contrib": {
+                pdt_smi: {
+                    rct_smi: (atoms rct -> pdt) / tot_pdt_atoms
+                }
+            }
+            "tot_rct_normed_mass_contrib": {
+                pdt_smi: \sum(rnmc) / \sum(rct atoms)
+            }
+        }
+
+    Notes
+    -----
+    Stoichiometric multiples of a unique molecule are aggregated into one account.
+    e.g., if A_1 + A_2 >> C + D and A_1 contributes 2 atoms to C and A_2 contributes 3 atoms to C,
+    it will be counted as A contributes 5 atoms to C.
+    '''
+    rcts_smiles, pdts_smiles = de_am(am_rxn)
+
+    rcts, pdts = [
+        [Chem.MolFromSmiles(elt) for elt in side.split('.')]
+        for side in am_rxn.split('>>')
+    ]
+    
+    # Collect atom map numbers to rct / pdt indices
+    amn_to_rct_idx = {}
+    amn_to_pdt_idx = {}
+    _amns = []
+    amns_ = []
+    for rct_idx, rct in enumerate(rcts):
+        for atom in rct.GetAtoms():
+            amn = atom.GetAtomMapNum()
             
-#             for rct_id, pnmc in rcts.items():
-#                 source_mass = sum(rcts[s] for s in this_sources - {rct_id}) # Mass contribution from designated sources
-#                 rnmc = rct_normed_mass_contrib[str(pdt_id)][str(rct_id)]
+            if amn == 0:
+                raise ValueError("Atom map numbers must be non-zero.")
 
-#                 # Reactant must contribute more than lower bounds on both pdt- and rct- 
-#                 # normed mass contributions and together
-#                 # w/ the designated sources must contribue all the mass (minus fudge factor)
-#                 if pnmc >= pnmc_lb and rnmc >= rnmc_lb and (pnmc + source_mass) >= tot_mass_lb - ep:
-#                     edges.append(
-#                         (
-#                             rct_id,
-#                             pdt_id,
-#                             {
-#                                 'reaction_id': rid,
-#                                 'pdt_normed_mass_frac': pnmc,
-#                                 'rct_normed_mass_frac': rnmc,
-#                                 'am_smarts': am_smarts,
-#                                 'coreactants': tuple(this_sources),
-#                                 'coproducts': tuple(set(int(k) for k in pdt_normed_mass_contrib.keys()) - {pdt_id}),
-#                             }
-#                         )
-#                     )
+            amn_to_rct_idx[amn] = rct_idx
+            _amns.append(amn)
+    
+    for pdt_idx, pdt in enumerate(pdts):
+        for atom in pdt.GetAtoms():
+            amn = atom.GetAtomMapNum()
 
-#                     nodes[rct_id] = (rct_id, compounds.loc[compounds.id == rct_id, ['smiles', 'name']].to_dict('records')[0])
-#                     nodes[pdt_id] = (pdt_id, compounds.loc[compounds.id == pdt_id, ['smiles', 'name']].to_dict('records')[0])
+            if amn == 0:
+                raise ValueError("Atom map numbers must be non-zero.")
+            
+            amn_to_pdt_idx[amn] = pdt_idx
+            amns_.append(amn)
 
-#     return edges, list(nodes.values())
+    # Check atom map nums are 1-to-1
+    amns = set(_amns) & set(amns_)
+    if len(amns) != len(_amns) or len(amns) != len(amns_):
+        raise ValueError("Atom map numbers are not 1-to-1 between reactants and products.")
+    
+    # Here and below you will count atoms for stoichiometric multiples into the same 
+    # key values, the smiles of the reactant or product
+    # Count atoms received by molecule i from molecule j
+    atom_counts = {i_smi: {j_smi: 0 for j_smi in rcts_smiles} for i_smi in pdts_smiles}
+    for amn in amns:
+        rct_smi = rcts_smiles[amn_to_rct_idx[amn]]
+        pdt_smi = pdts_smiles[amn_to_pdt_idx[amn]]
+        atom_counts[pdt_smi][rct_smi] += 1
+
+    # Collect rct n atoms to normalize mass contributions
+    # in one returned dict
+    rct_smi_to_n_atoms = {}
+    for rct, rct_smi in zip(rcts, rcts_smiles):
+        rct_smi_to_n_atoms[rct_smi] = rct.GetNumAtoms()
+    
+    # Normalize by number of atoms in reactant / product
+    rct_normed_mass_contrib = {}
+    pdt_normed_mass_contrib = {}
+    tot_rct_normed_mass_contrib = {}
+    for pdt_smi, rct_dict in atom_counts.items():
+        rct_normed_mass_contrib[pdt_smi] = {}
+        pdt_normed_mass_contrib[pdt_smi] = {}
+        tot_rct_normed_mass_contrib[pdt_smi] = 0
+        tot_atoms = sum(rct_dict.values()) # Total atoms in product
+        for rct_smi, count in rct_dict.items():
+            rct_normed_mass_contrib[pdt_smi][rct_smi] = count / rct_smi_to_n_atoms[rct_smi]
+            pdt_normed_mass_contrib[pdt_smi][rct_smi] = count / tot_atoms
+            tot_rct_normed_mass_contrib[pdt_smi] += count
+        
+        tot_rct_normed_mass_contrib[pdt_smi] /= sum(rct_smi_to_n_atoms.values()) # Normalize by total number of atoms in reactants
+
+    return {
+        "rct_normed_mass_contrib": rct_normed_mass_contrib,
+        "pdt_normed_mass_contrib": pdt_normed_mass_contrib,
+        "tot_rct_normed_mass_contrib": tot_rct_normed_mass_contrib,
+    }
+
+def de_am(am_rxn: str) -> tuple[str, str]:
+    '''
+    Converts an atom-mapped reaction string to a de atom mapped SMILES
+    of reactants and pdts.
+
+    Args
+    ----
+    am_rxn: str
+        Atom-mapped reaction string in the form of "R1.R2.R3>>P1.P2.P3"
+    
+    Returns
+    -------
+    rcts: list[str]
+        List of reactant SMILES strings.
+    pdts: list[str]
+        List of product SMILES strings.
+    '''
+    am_rcts, am_pdts = [[Chem.MolFromSmiles(elt) for elt in side.split('.')] for side in am_rxn.split('>>')]
+    for mol in am_rcts + am_pdts:
+        if mol is None:
+            raise ValueError(f"Invalid SMILES in reaction: {am_rxn}")
+        for atom in mol.GetAtoms():
+            atom.SetAtomMapNum(0)
+
+    rcts = [Chem.MolToSmiles(mol) for mol in am_rcts]
+    pdts = [Chem.MolToSmiles(mol) for mol in am_pdts]
+    return rcts, pdts
+    
 
 @dataclass
 class SyntheticTree:

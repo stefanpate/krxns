@@ -113,12 +113,12 @@ hydra:
     - hydra.mode=RUN
     task: []
   job:
-    name: construct_reaction_network
+    name: construct_known_reaction_network
     chdir: true
     override_dirname: ''
     id: ???
     num: ???
-    config_name: process_reactions
+    config_name: construct_known_reaction_network
     env_set: {}
     env_copy: []
     config:
