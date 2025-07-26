@@ -13,8 +13,7 @@ import json
 # from ergochemics.noseque import hash_compound, hash_reaction # TODO
 
 class ReactionNetwork(nx.MultiDiGraph):
-    def __init__(self, incoming_graph_data=None, multigraph_input=None, ij2k={}, **attr):
-        self.ij2k = ij2k
+    def __init__(self, incoming_graph_data=None, multigraph_input=None, **attr):
         super().__init__(incoming_graph_data, multigraph_input, **attr)
 
     @classmethod
@@ -23,14 +22,11 @@ class ReactionNetwork(nx.MultiDiGraph):
         with open(fp, 'r') as f:
             data = json.load(f)
 
-        ij2k = data.pop('ij2k', {})
-        ij2k = {tuple(map(int, k.split(','))): v for k, v in ij2k.items()}  # Convert keys back to tuples
         G = nx.node_link_graph(data, edges="edges")
-        return cls(incoming_graph_data=G, ij2k=ij2k)
+        return cls(incoming_graph_data=G)
     
     def to_json(self, fp: pathlib.Path | str) -> None:
         data = nx.node_link_data(self, edges="edges")
-        data['ij2k'] = {','.join(map(str, k)): v for k, v in self.ij2k.items()}  # Convert ij2k to a serializable format
         
         with open(fp, "w") as f:
             json.dump(data, f)
@@ -45,23 +41,13 @@ class ReactionNetwork(nx.MultiDiGraph):
         # TODO: switch to hashing
         if type(u_for_edge) is not int or type(v_for_edge) is not int:
             raise TypeError("Node indices must be integers.")
+        
         key = super().add_edge(u_for_edge, v_for_edge, key=key, **attr)
-        ij = (u_for_edge, v_for_edge)
-        if ij in self.ij2k:
-            self.ij2k[ij].append(key)
-        else:
-            self.ij2k[ij] = [key]
-
+        
         return key
 
     def get_nodes_by_prop(self, prop: str, value: Any) -> list[int]:
         return [x for x, y in self.nodes(data=True) if y[prop] == value]
-    
-    def get_edges_between(self, source:int, target:int, k:int = None):
-        if k:
-            return self.edges[source, target, k]
-        else:
-            return [self.edges[source, target, k] for k in self.ij2k[(source, target)]]
         
     def shortest_path(self, source:int = None, target:int = None, rm_req_target: bool = True, quiet: bool = False) -> dict | list:
         if source is None and target is None:
@@ -145,6 +131,7 @@ class ReactionNetwork(nx.MultiDiGraph):
                 self.add_edge(
                     rct_id,
                     pdt_id,
+                    key=rid,
                     **{
                         'reaction_id': rid,
                         'pnmc': pnmc,
