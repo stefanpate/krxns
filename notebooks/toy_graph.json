@@ -1,0 +1,231 @@
+{
+    "directed": true,
+    "multigraph": true,
+    "graph": {},
+    "nodes": [
+        {
+            "grouped_predecessors": {
+                "R1": [
+                    1
+                ],
+                "R2": [
+                    2
+                ],
+                "R3": [
+                    3,
+                    4
+                ]
+            },
+            "tot_rnmc": {
+                "R1": 1.0,
+                "R2": 1.0,
+                "R3": 1.0
+            },
+            "id": 0
+        },
+        {
+            "grouped_predecessors": {
+                "R4": [
+                    5
+                ],
+                "R5": [
+                    6,
+                    7
+                ]
+            },
+            "tot_rnmc": {
+                "R4": 1.0,
+                "R5": 1.0
+            },
+            "id": 1
+        },
+        {
+            "grouped_predecessors": {},
+            "tot_rnmc": {},
+            "id": 2
+        },
+        {
+            "grouped_predecessors": {
+                "R6": [
+                    8,
+                    9
+                ]
+            },
+            "tot_rnmc": {
+                "R6": 0.8
+            },
+            "id": 3
+        },
+        {
+            "grouped_predecessors": {
+                "R7": [
+                    10
+                ]
+            },
+            "tot_rnmc": {
+                "R7": 1.0
+            },
+            "id": 4
+        },
+        {
+            "grouped_predecessors": {},
+            "tot_rnmc": {},
+            "id": 5
+        },
+        {
+            "grouped_predecessors": {},
+            "tot_rnmc": {},
+            "id": 6
+        },
+        {
+            "grouped_predecessors": {
+                "R8": [
+                    11
+                ]
+            },
+            "tot_rnmc": {
+                "R8": 0.9
+            },
+            "id": 7
+        },
+        {
+            "grouped_predecessors": {
+                "R9": [
+                    12
+                ]
+            },
+            "tot_rnmc": {
+                "R9": 1.0
+            },
+            "id": 8
+        },
+        {
+            "grouped_predecessors": {
+                "R10": [
+                    13
+                ]
+            },
+            "tot_rnmc": {
+                "R10": 0.95
+            },
+            "id": 9
+        },
+        {
+            "grouped_predecessors": {},
+            "tot_rnmc": {},
+            "id": 10
+        },
+        {
+            "grouped_predecessors": {},
+            "tot_rnmc": {},
+            "id": 11
+        },
+        {
+            "grouped_predecessors": {
+                "R11": [
+                    14
+                ]
+            },
+            "tot_rnmc": {
+                "R11": 0.85
+            },
+            "id": 12
+        },
+        {
+            "grouped_predecessors": {},
+            "tot_rnmc": {},
+            "id": 13
+        },
+        {
+            "grouped_predecessors": {},
+            "tot_rnmc": {},
+            "id": 14
+        }
+    ],
+    "links": [
+        {
+            "rid": "R1",
+            "source": 1,
+            "target": 0,
+            "key": 0
+        },
+        {
+            "rid": "R2",
+            "source": 2,
+            "target": 0,
+            "key": 0
+        },
+        {
+            "rid": "R3",
+            "source": 3,
+            "target": 0,
+            "key": 0
+        },
+        {
+            "rid": "R3",
+            "source": 4,
+            "target": 0,
+            "key": 0
+        },
+        {
+            "rid": "R4",
+            "source": 5,
+            "target": 1,
+            "key": 0
+        },
+        {
+            "rid": "R5",
+            "source": 6,
+            "target": 1,
+            "key": 0
+        },
+        {
+            "rid": "R5",
+            "source": 7,
+            "target": 1,
+            "key": 0
+        },
+        {
+            "rid": "R6",
+            "source": 8,
+            "target": 3,
+            "key": 0
+        },
+        {
+            "rid": "R6",
+            "source": 9,
+            "target": 3,
+            "key": 0
+        },
+        {
+            "rid": "R7",
+            "source": 10,
+            "target": 4,
+            "key": 0
+        },
+        {
+            "rid": "R8",
+            "source": 11,
+            "target": 7,
+            "key": 0
+        },
+        {
+            "rid": "R9",
+            "source": 12,
+            "target": 8,
+            "key": 0
+        },
+        {
+            "rid": "R10",
+            "source": 13,
+            "target": 9,
+            "key": 0
+        },
+        {
+            "rid": "R11",
+            "source": 14,
+            "target": 12,
+            "key": 0
+        }
+    ]
+}

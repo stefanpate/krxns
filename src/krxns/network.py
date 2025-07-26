@@ -2,7 +2,6 @@ import networkx as nx
 from networkx.exception import NetworkXNoPath
 from typing import Any
 from copy import deepcopy
-import pandas as pd
 from dataclasses import dataclass, field
 from collections import deque
 from itertools import product
@@ -163,14 +162,67 @@ class ReactionNetwork(nx.MultiDiGraph):
             raise ValueError("Provide either smiles or indices to set sources.")
         
         if smiles is not None:
-            indices = [self.get_nodes_by_prop('smiles', smi) for smi in smiles]
+            indices = [idx for smi in smiles for idx in self.get_nodes_by_prop('smiles', smi)]
         
         for idx in indices:
             if idx in self.nodes:
                 self.nodes[idx]['source'] = True
             else:
                 raise ValueError(f"Node index {idx} not found in the network.")
+                
+    '''
+    - Iterate over nodes
+        - Iterate over reactions in node attr
+            - Iterate over compounds in grouped_predecessors
+                - Collect pnmc for each predecessor & sources (cache)
+                - Mark edges (i, j) for deletion if fail rnmc and pnmc criteria
+            - Iterate over grouped_predecessors
+                - Mark edges (i, j) for deletion if fail pnmc + source_mass < augmented mass criteria
+    - Remove marked edges
+    '''
+    def prune(self, pnmc_lb: float, rnmc_lb: float, source_augmented_pnmc_lb: float) -> None:
+        '''
+        Prunes the reaction network based on the provided thresholds.
 
+        Args
+        ----
+        pnmc_lb: float
+            Lower bound for product normalized mass contribution.
+        rnmc_lb: float
+            Lower bound for total reaction normalized mass contribution.
+        source_augmented_pnmc_lb: float
+            Lower bound for augmented product normalized mass contribution from sources.
+        '''
+        to_remove = []
+        
+        for node, data in self.nodes(data=True):
+            if 'grouped_predecessors' not in data or 'tot_rnmc' not in data:
+                continue
+            
+            for rxn_id, preds in data['grouped_predecessors'].items():
+                rxn_id = int(rxn_id) # TODO: Will one day switch to hash strings
+                rxn_pnmcs = {}
+                rxn_sources = set()
+                for pred in preds:
+                    edge_data = self.get_edge_data(pred, node, key=rxn_id)
+                    rxn_pnmcs[pred] = edge_data['pnmc']
+                    if self.nodes[pred]['source']:
+                        rxn_sources.add(pred)
+
+                for pred in preds:
+                    # Mark for deletion and move on if fails either indepenedent criteria
+                    if edge_data['rnmc'] < rnmc_lb or edge_data['pnmc'] < pnmc_lb:
+                        to_remove.append((pred, node, rxn_id))
+                        continue
+                    
+                    source_mass = sum(rxn_pnmcs[s] for s in rxn_sources if s != pred) # Source contribution, excl pred if it is a source, avoid double counting
+                    # Mark for deletion if fails augmented mass criteria
+                    if rxn_pnmcs[pred] + source_mass < source_augmented_pnmc_lb:
+                        to_remove.append((pred, node, rxn_id))
+
+        self.remove_edges_from(to_remove) # Prune edges
+        self.remove_nodes_from(list(nx.isolates(self))) # Prune disconnected nodes
+                
 def get_mass_contributions(am_rxn: str) -> dict[str, dict[int, dict[int, float]]]:
     '''
     Returns fraction of atoms in a reactant / product coming from a product / reactant, respectively
@@ -449,6 +501,7 @@ def enumerate_synthetic_trees(target: int, sources: set[int], G: ReactionNetwork
     return synthetic_trees
        
 if __name__ == '__main__':
+    import pandas as pd
     nodes = [
         (0, {'grouped_predecessors': {'R1': [1,], 'R2': [2,], 'R3': [3, 4]}, 'tot_rnmc': {'R1': 1.0, 'R2': 1.0, 'R3': 1.0}}),
         (1, {'grouped_predecessors': {'R4': [5,], 'R5': [6, 7]}, 'tot_rnmc': {'R4': 1.0, 'R5': 1.0}}),
@@ -506,3 +559,24 @@ if __name__ == '__main__':
 
 
     G = ReactionNetwork.from_json('/home/stef/krxns/data/processed/known_reaction_network.json')
+    print("Full reaction network loaded from JSON.")
+    print(f"Number of nodes: {G.number_of_nodes()}, Number of edges: {G.number_of_edges()}")
+    rnmc_lb = 0.25
+    pnmc_lb = 0.25
+    aug_mc_lb = 0.8
+    G.prune(pnmc_lb=pnmc_lb, rnmc_lb=rnmc_lb, source_augmented_pnmc_lb=aug_mc_lb)
+    print(f"Pruned reaction network with pnmc_lb={pnmc_lb}, rnmc_lb={rnmc_lb}, source_augmented_pnmc_lb={aug_mc_lb}.")
+    print(f"Number of nodes after pruning: {G.number_of_nodes()}, Number of edges: {G.number_of_edges()}")
+
+    G = ReactionNetwork.from_json('/home/stef/krxns/data/processed/known_reaction_network.json')
+    print("Full reaction network loaded from JSON.")
+    print(f"Number of nodes: {G.number_of_nodes()}, Number of edges: {G.number_of_edges()}")
+    sources = pd.read_csv('/home/stef/krxns/data/interim/default_sources.csv')['smiles'].tolist()
+    G.set_sources(smiles=sources)
+    rnmc_lb = 0.25
+    pnmc_lb = 0.25
+    aug_mc_lb = 0.8
+    G.prune(pnmc_lb=pnmc_lb, rnmc_lb=rnmc_lb, source_augmented_pnmc_lb=aug_mc_lb)
+    print(f"Pruned reaction network with pnmc_lb={pnmc_lb}, rnmc_lb={rnmc_lb}, source_augmented_pnmc_lb={aug_mc_lb}, and default sources.")
+    print(f"Number of nodes after pruning: {G.number_of_nodes()}, Number of edges: {G.number_of_edges()}")
+    

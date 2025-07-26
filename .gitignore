@@ -147,7 +147,4 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
-data/raw/sprhea_240310_v3_mapped_no_subunits.json
-notebooks/*_graph.json
 data/processed/known_reaction_network.json
-data/processed/known_reaction_network_v0.json
