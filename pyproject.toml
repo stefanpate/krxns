@@ -21,6 +21,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "krxns",
+    "line-profiler>=5.0.0",
     "pytest>=8.3.5",
 ]
 
