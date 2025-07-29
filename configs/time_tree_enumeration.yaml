@@ -1,0 +1,29 @@
+defaults:
+  - filepaths: filepaths
+  - _self_
+
+starters: ccm_aa
+target: 1844
+default_sources: ${filepaths.interim_data}/default_sources.csv
+known_reaction_network: ${filepaths.processed_data}/known_reaction_network.json
+additional_sources:     
+  - CC(O)C(=O)O # lactic acid
+  - CC(O)C(N)C(=O)O # threonine
+
+max_depths:
+  - 1
+  - 2
+
+max_leaves:
+  - 4
+
+tot_rnmc_lb: 0.1
+
+hydra:
+  run:
+    dir: ${filepaths.interim_data}
+  job:
+    chdir: True
+  sweep:
+    dir: ${filepaths.interim_data}
+    subdir: .
