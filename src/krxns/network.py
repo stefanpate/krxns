@@ -9,7 +9,7 @@ from rdkit import Chem
 from typing import Iterable
 import pathlib
 import json
-# from ergochemics.noseque import hash_compound, hash_reaction # TODO
+from ergochemics.standardize import hash_compound, hash_reaction
 
 @dataclass
 class SyntheticTree:
@@ -18,14 +18,14 @@ class SyntheticTree:
 
     Attributes
     ----------
-    root: int
+    root: str
         Node index of the root of the tree, typically the target compound.
-    generations: list[dict[int, str]]
+    generations: list[dict[str, str]]
         A list of dictionaries representing each generation in the tree.
-        Each dictionary maps compound node indices to the reaction ID that produced them. Value
+        Each dictionary maps compound node ids to the reaction id that produced them. Value
         is None for compounds that have not been produced by any reaction.
-    leaves: list[tuple[int, int]]
-        A list of tuples where each tuple contains a node index and its generation index.
+    leaves: list[tuple[str, int]]
+        A list of tuples where each tuple contains a node id and its generation index.
         Represents the current leaves of the tree, i.e., compounds that have not been further reacted
         or transformed. The generation index is required to disambiguate leaves of the same compound
         that are at different generations of the tree.
@@ -44,9 +44,9 @@ class SyntheticTree:
         The leaf is a tuple containing the compound ID and its generation index.
         The reaction ID and the list of reactants are provided to update the tree.
     '''
-    root: int
-    generations: list[dict[int, str]] = field(default_factory=list)
-    leaves: list[tuple[int, int]] = field(default_factory=list)
+    root: str
+    generations: list[dict[str, str]] = field(default_factory=list)
+    leaves: list[tuple[str, int]] = field(default_factory=list)
 
     def copy(self):
         return SyntheticTree(
@@ -60,7 +60,6 @@ class SyntheticTree:
             self.generations = [{self.root: None}]
             self.leaves.append((self.root, 0))
 
-    
     def grow(self, leaf: tuple[str, int], rxn_id: str, rcts: list[str]):
         if leaf not in self.leaves:
             raise ValueError(f"Leaf {leaf} not in tree")
@@ -102,30 +101,15 @@ class ReactionNetwork(nx.MultiDiGraph):
         with open(fp, "w") as f:
             json.dump(data, f)
 
-    def add_node(self, node, **attr):
-        # TODO: switch to hashing
-        if type(node) is not int:
-            raise TypeError("Node index must be an integer.")
-        return super().add_node(node, **attr)
-    
-    def add_edge(self, u_for_edge, v_for_edge, key=None, **attr):
-        # TODO: switch to hashing
-        if type(u_for_edge) is not int or type(v_for_edge) is not int:
-            raise TypeError("Node indices must be integers.")
-        
-        key = super().add_edge(u_for_edge, v_for_edge, key=key, **attr)
-        
-        return key
-
     def get_nodes_by_prop(self, prop: str, value: Any) -> list[int]:
         return [x for x, y in self.nodes(data=True) if y[prop] == value]
         
-    def shortest_path(self, source:int = None, target:int = None, rm_req_target: bool = True, quiet: bool = False) -> dict | list:
+    def shortest_path(self, source: str = None, target: str = None, rm_req_target: bool = True, quiet: bool = False) -> dict | list:
         if source is None and target is None:
             return nx.shortest_path(self)
         elif (source is None) ^ (target is None):
             raise ValueError("Provide both source and target or neither")
-        elif rm_req_target:
+        elif rm_req_target: # TODO: remember what this was for
             target_smiles = self.nodes[target]['smiles']
             to_remove = [(i, j) for i, j, props in self.edges(data=True) if target_smiles in props['coreactants']]
             pruned = deepcopy(self)
@@ -146,7 +130,7 @@ class ReactionNetwork(nx.MultiDiGraph):
 
         return node_path, edge_path
     
-    def add_reaction(self, am_rxn: str, rid: str | int, smi2name: dict[str, str]) -> None:
+    def add_reaction(self, am_rxn: str, rid: str | None = None, smi2name: dict[str, str] = {}) -> None:
         '''
         Adds a reaction to the reaction network.
 
@@ -154,20 +138,15 @@ class ReactionNetwork(nx.MultiDiGraph):
         ----
         am_rxn: str
             Atom-mapped reaction string in the form of "R1.R2.R3>>P1.P2.P3".
-        rid: str | int
-            Reaction ID, can be a string or an integer.
-        smi2name: dict[str, str]
+        rid: str | None
+            Reaction ID. If None, uses a hash of the reaction string.
+        smi2name: dict[str, str] (Optional)
             Mapping from SMILES to compound names.
         '''
-        node_indices = {data['smiles']: idx for idx, data in self.nodes(data=True)} # Collect SMILES: idx mapping for all existing nodes
-        mass_contributions = get_mass_contributions(am_rxn)
+        mass_contributions, de_am_rxn = get_mass_contributions(am_rxn)
+        rid = rid or hash_reaction(de_am_rxn)
         for pdt_smi, rcts in mass_contributions['pdt_normed_mass_contrib'].items():
-            
-            # Update collection of node indices if this is a new one
-            if pdt_smi not in node_indices:
-                node_indices[pdt_smi] = len(node_indices)
-            
-            pdt_id = node_indices[pdt_smi]
+            pdt_id = hash_compound(pdt_smi)
 
             # Create new node with all but the grouped predecessors
             if pdt_id not in self.nodes:
@@ -184,11 +163,8 @@ class ReactionNetwork(nx.MultiDiGraph):
            
             grouped_predecessors = []
             for rct_smi, pnmc in rcts.items():
-                # Update collection of node indices if this is a new one
-                if rct_smi not in node_indices:
-                    node_indices[rct_smi] = len(node_indices)
+                rct_id = hash_compound(rct_smi)
 
-                rct_id = node_indices[rct_smi]
                 grouped_predecessors.append(rct_id)
                 rnmc = mass_contributions['rct_normed_mass_contrib'][pdt_smi][rct_smi]
                 
@@ -213,7 +189,7 @@ class ReactionNetwork(nx.MultiDiGraph):
             # Finally add grouped predecessors
             self.nodes[pdt_id]['grouped_predecessors'][rid] = grouped_predecessors
     
-    def set_sources(self, smiles: Iterable[str] = None, indices: Iterable[int] = None) -> None:
+    def set_sources(self, smiles: Iterable[str] = None, ids: Iterable[int] = None) -> None:
         '''
         Sets the source compounds in the reaction network.
 
@@ -229,28 +205,18 @@ class ReactionNetwork(nx.MultiDiGraph):
         ValueError
             If neither `smiles` nor `indices` are provided.
         '''
-        if smiles is None and indices is None:
+        if smiles is None and ids is None:
             raise ValueError("Provide either smiles or indices to set sources.")
         
         if smiles is not None:
-            indices = [idx for smi in smiles for idx in self.get_nodes_by_prop('smiles', smi)]
+            ids = [_id for smi in smiles for _id in self.get_nodes_by_prop('smiles', smi)]
         
-        for idx in indices:
-            if idx in self.nodes:
-                self.nodes[idx]['source'] = True
+        for _id in ids:
+            if _id in self.nodes:
+                self.nodes[_id]['source'] = True
             else:
-                raise ValueError(f"Node index {idx} not found in the network.")
-                
-    '''
-    - Iterate over nodes
-        - Iterate over reactions in node attr
-            - Iterate over compounds in grouped_predecessors
-                - Collect pnmc for each predecessor & sources (cache)
-                - Mark edges (i, j) for deletion if fail rnmc and pnmc criteria
-            - Iterate over grouped_predecessors
-                - Mark edges (i, j) for deletion if fail pnmc + source_mass < augmented mass criteria
-    - Remove marked edges
-    '''
+                raise ValueError(f"Node id {_id} not found in the network.")
+   
     def prune(self, pnmc_lb: float, rnmc_lb: float, source_augmented_pnmc_lb: float) -> None:
         '''
         Prunes the reaction network based on the provided thresholds.
@@ -271,7 +237,6 @@ class ReactionNetwork(nx.MultiDiGraph):
                 continue
             
             for rxn_id, preds in data['grouped_predecessors'].items():
-                rxn_id = int(rxn_id) # TODO: Will one day switch to hash strings
                 rxn_pnmcs = {}
                 rxn_sources = set()
                 for pred in preds:
@@ -294,7 +259,6 @@ class ReactionNetwork(nx.MultiDiGraph):
         # Remove from grouped predecessors attr
         # TODO: consider alt soln e.g., caching and raw atom counts to avoid this
         for i, j, k in to_remove:
-            k = str(k)
             self.nodes[j]['grouped_predecessors'][k].remove(i) # Remove from grouped predecessors
 
             if len(self.nodes[j]['grouped_predecessors'][k]) == 0: # Remove key if no predecessors left
@@ -303,14 +267,14 @@ class ReactionNetwork(nx.MultiDiGraph):
         self.remove_edges_from(to_remove) # Prune edges
         self.remove_nodes_from(list(nx.isolates(self))) # Prune disconnected nodes
     
-    def enumerate_synthetic_trees(self, target: int, max_depth: int, max_leaves: int, tot_rnmc_lb: float = 0.1) -> list[SyntheticTree]:
+    def enumerate_synthetic_trees(self, target: str, max_depth: int, max_leaves: int, tot_rnmc_lb: float = 0.1) -> list[SyntheticTree]:
         '''
         Enumerates synthetic trees for a given target compound in a reaction network.
 
         Args
         ----
-        target: int
-            Node index of the target compound for which to enumerate synthetic trees.
+        target: str
+            Node id of the target compound for which to enumerate synthetic trees.
         max_depth: int
             Maximum depth of the synthetic tree.
         max_leaves: int
@@ -378,7 +342,7 @@ def get_mass_contributions(am_rxn: str) -> dict[str, dict[int, dict[int, float]]
     
     Returns
     -------
-    dict[str, dict[int, dict[int, float]]]
+    mass_contributrions: dict[str, dict[int, dict[int, float]]]
         With differently normalized mass contributions:
         {
             "rct_normed_mass_contrib": {
@@ -395,6 +359,8 @@ def get_mass_contributions(am_rxn: str) -> dict[str, dict[int, dict[int, float]]
                 pdt_smi: sum(rnmc) / sum(rct atoms)
             }
         }
+    de_am_rxn: str
+        Atom-mapped reaction string with atom map numbers removed, in the form of "R1.R2.R3>>P1.P2.P3"
 
     Notes
     -----
@@ -470,11 +436,15 @@ def get_mass_contributions(am_rxn: str) -> dict[str, dict[int, dict[int, float]]
         
         tot_rct_normed_mass_contrib[pdt_smi] /= sum(rct_smi_to_n_atoms.values()) # Normalize by total number of atoms in reactants
 
-    return {
+    mass_contributions = {
         "rct_normed_mass_contrib": rct_normed_mass_contrib,
         "pdt_normed_mass_contrib": pdt_normed_mass_contrib,
         "tot_rct_normed_mass_contrib": tot_rct_normed_mass_contrib,
     }
+    de_am_rxn = '.'.join(rcts_smiles) + '>>' + '.'.join(pdts_smiles)
+
+    return mass_contributions, de_am_rxn
+
 
 def de_am(am_rxn: str) -> tuple[str, str]:
     '''
@@ -506,84 +476,83 @@ def de_am(am_rxn: str) -> tuple[str, str]:
        
 if __name__ == '__main__':
     import pandas as pd
-    # nodes = [
-    #     (0, {'grouped_predecessors': {1: [1,], 2: [2,], 3: [3, 4]}, 'tot_rnmc': {1: 1.0, 2: 1.0, 3: 1.0}, 'source': False}),
-    #     (1, {'grouped_predecessors': {4: [5,], 5: [6, 7]}, 'tot_rnmc': {4: 1.0, 5: 1.0}, 'source': False}),
-    #     (2, {'grouped_predecessors': {}, 'tot_rnmc': {}, 'source': False}),
-    #     (3, {'grouped_predecessors': {6: [8, 9]}, 'tot_rnmc': {6: 0.8}, 'source': False}),
-    #     (4, {'grouped_predecessors': {7: [10,]}, 'tot_rnmc': {7: 1.0}, 'source': False}),
-    #     (5, {'grouped_predecessors': {}, 'tot_rnmc': {}, 'source': False}),
-    #     (6, {'grouped_predecessors': {}, 'tot_rnmc': {}, 'source': False}),
-    #     (7, {'grouped_predecessors': {8: [11,]}, 'tot_rnmc': {8: 0.9}, 'source': False}),
-    #     (8, {'grouped_predecessors': {9: [12,]}, 'tot_rnmc': {9: 1.0}, 'source': False}),
-    #     (9, {'grouped_predecessors': {10: [13,]}, 'tot_rnmc': {10: 0.95}, 'source': False}),
-    #     (10, {'grouped_predecessors': {}, 'tot_rnmc': {}, 'source': False}),
-    #     (11, {'grouped_predecessors': {}, 'tot_rnmc': {}, 'source': False}),
-    #     (12, {'grouped_predecessors': {11: [14,]}, 'tot_rnmc': {11: 0.85}, 'source': False}),
-    #     (13, {'grouped_predecessors': {}, 'tot_rnmc': {}, 'source': False}),
-    #     (14, {'grouped_predecessors': {}, 'tot_rnmc': {}, 'source': False}),
-    # ]
+    nodes = [
+        (0, {'grouped_predecessors': {1: [1,], 2: [2,], 3: [3, 4]}, 'tot_rnmc': {1: 1.0, 2: 1.0, 3: 1.0}, 'source': False}),
+        (1, {'grouped_predecessors': {4: [5,], 5: [6, 7]}, 'tot_rnmc': {4: 1.0, 5: 1.0}, 'source': False}),
+        (2, {'grouped_predecessors': {}, 'tot_rnmc': {}, 'source': False}),
+        (3, {'grouped_predecessors': {6: [8, 9]}, 'tot_rnmc': {6: 0.8}, 'source': False}),
+        (4, {'grouped_predecessors': {7: [10,]}, 'tot_rnmc': {7: 1.0}, 'source': False}),
+        (5, {'grouped_predecessors': {}, 'tot_rnmc': {}, 'source': False}),
+        (6, {'grouped_predecessors': {}, 'tot_rnmc': {}, 'source': False}),
+        (7, {'grouped_predecessors': {8: [11,]}, 'tot_rnmc': {8: 0.9}, 'source': False}),
+        (8, {'grouped_predecessors': {9: [12,]}, 'tot_rnmc': {9: 1.0}, 'source': False}),
+        (9, {'grouped_predecessors': {10: [13,]}, 'tot_rnmc': {10: 0.95}, 'source': False}),
+        (10, {'grouped_predecessors': {}, 'tot_rnmc': {}, 'source': False}),
+        (11, {'grouped_predecessors': {}, 'tot_rnmc': {}, 'source': False}),
+        (12, {'grouped_predecessors': {11: [14,]}, 'tot_rnmc': {11: 0.85}, 'source': False}),
+        (13, {'grouped_predecessors': {}, 'tot_rnmc': {}, 'source': False}),
+        (14, {'grouped_predecessors': {}, 'tot_rnmc': {}, 'source': False}),
+    ]
 
-    # edges = [
-    #     (1, 0, 1, {'pnmc': 1.0, 'rnmc': 1.0}),
-    #     (2, 0, 2, {'pnmc': 1.0, 'rnmc': 1.0}),
-    #     (3, 0, 3, {'pnmc': 1.0, 'rnmc': 1.0}),
-    #     (4, 0, 3, {'pnmc': 1.0, 'rnmc': 1.0}),
-    #     (5, 1, 4, {'pnmc': 1.0, 'rnmc': 1.0}),
-    #     (6, 1, 5, {'pnmc': 1.0, 'rnmc': 1.0}),
-    #     (7, 1, 5, {'pnmc': 1.0, 'rnmc': 1.0}),
-    #     (8, 3, 6, {'pnmc': 1.0, 'rnmc': 1.0}),
-    #     (9, 3, 6, {'pnmc': 1.0, 'rnmc': 1.0}),
-    #     (10, 4, 7, {'pnmc': 1.0, 'rnmc': 1.0}),
-    #     (11, 7, 8, {'pnmc': 1.0, 'rnmc': 1.0}),
-    #     (12, 8, 9, {'pnmc': 1.0, 'rnmc': 1.0}),
-    #     (13, 9, 10, {'pnmc': 1.0, 'rnmc': 1.0}),
-    #     (14, 12, 11, {'pnmc': 1.0, 'rnmc': 1.0}),
+    edges = [
+        (1, 0, 1, {'pnmc': 1.0, 'rnmc': 1.0}),
+        (2, 0, 2, {'pnmc': 1.0, 'rnmc': 1.0}),
+        (3, 0, 3, {'pnmc': 1.0, 'rnmc': 1.0}),
+        (4, 0, 3, {'pnmc': 1.0, 'rnmc': 1.0}),
+        (5, 1, 4, {'pnmc': 1.0, 'rnmc': 1.0}),
+        (6, 1, 5, {'pnmc': 1.0, 'rnmc': 1.0}),
+        (7, 1, 5, {'pnmc': 1.0, 'rnmc': 1.0}),
+        (8, 3, 6, {'pnmc': 1.0, 'rnmc': 1.0}),
+        (9, 3, 6, {'pnmc': 1.0, 'rnmc': 1.0}),
+        (10, 4, 7, {'pnmc': 1.0, 'rnmc': 1.0}),
+        (11, 7, 8, {'pnmc': 1.0, 'rnmc': 1.0}),
+        (12, 8, 9, {'pnmc': 1.0, 'rnmc': 1.0}),
+        (13, 9, 10, {'pnmc': 1.0, 'rnmc': 1.0}),
+        (14, 12, 11, {'pnmc': 1.0, 'rnmc': 1.0}),
 
-    # ]
+    ]
 
-    # target = 0
-    # sources = {6, 10, 11, 13, 14}
-    # max_leaves = 5
-    # max_depth = 5
+    target = 0
+    sources = {6, 10, 11, 13, 14}
+    max_leaves = 5
+    max_depth = 5
     
-    # G = ReactionNetwork()
-    # G.add_nodes_from(nodes)
-    # G.add_edges_from(edges)
-    # G.set_sources(indices=sources)
-    # G.prune(pnmc_lb=0.25, rnmc_lb=0.25, source_augmented_pnmc_lb=0.6)
+    G = ReactionNetwork()
+    G.add_nodes_from(nodes)
+    G.add_edges_from(edges)
+    G.set_sources(ids=sources)
+    G.prune(pnmc_lb=0.25, rnmc_lb=0.25, source_augmented_pnmc_lb=0.6)
 
-    # synthetic_trees = G.enumerate_synthetic_trees(
-    #     target=target,
-    #     max_depth=max_depth,
-    #     max_leaves=max_leaves,
-    #     tot_rnmc_lb=0.1
-    # )
-    # print()
+    synthetic_trees = G.enumerate_synthetic_trees(
+        target=target,
+        max_depth=max_depth,
+        max_leaves=max_leaves,
+        tot_rnmc_lb=0.1
+    )
+    print()
 
 
-    # G = ReactionNetwork.from_json('/home/stef/krxns/data/processed/known_reaction_network.json')
-    # print("Full reaction network loaded from JSON.")
-    # print(f"Number of nodes: {G.number_of_nodes()}, Number of edges: {G.number_of_edges()}")
-    # rnmc_lb = 0.25
-    # pnmc_lb = 0.25
-    # aug_mc_lb = 0.8
-    # G.prune(pnmc_lb=pnmc_lb, rnmc_lb=rnmc_lb, source_augmented_pnmc_lb=aug_mc_lb)
-    # print(f"Pruned reaction network with pnmc_lb={pnmc_lb}, rnmc_lb={rnmc_lb}, source_augmented_pnmc_lb={aug_mc_lb}.")
-    # print(f"Number of nodes after pruning: {G.number_of_nodes()}, Number of edges: {G.number_of_edges()}")
+    G = ReactionNetwork.from_json('/home/stef/krxns/data/processed/known_reaction_network.json')
+    print("Full reaction network loaded from JSON.")
+    print(f"Number of nodes: {G.number_of_nodes()}, Number of edges: {G.number_of_edges()}")
+    rnmc_lb = 0.25
+    pnmc_lb = 0.25
+    aug_mc_lb = 0.8
+    G.prune(pnmc_lb=pnmc_lb, rnmc_lb=rnmc_lb, source_augmented_pnmc_lb=aug_mc_lb)
+    print(f"Pruned reaction network with pnmc_lb={pnmc_lb}, rnmc_lb={rnmc_lb}, source_augmented_pnmc_lb={aug_mc_lb}.")
+    print(f"Number of nodes after pruning: {G.number_of_nodes()}, Number of edges: {G.number_of_edges()}")
 
-    # G = ReactionNetwork.from_json('/home/stef/krxns/data/processed/known_reaction_network.json')
-    # print("Full reaction network loaded from JSON.")
-    # print(f"Number of nodes: {G.number_of_nodes()}, Number of edges: {G.number_of_edges()}")
-    # sources = pd.read_csv('/home/stef/krxns/data/interim/default_sources.csv')['smiles'].tolist()
-    # G.set_sources(smiles=sources)
-    # rnmc_lb = 0.25
-    # pnmc_lb = 0.25
-    # aug_mc_lb = 0.8
-    # G.prune(pnmc_lb=pnmc_lb, rnmc_lb=rnmc_lb, source_augmented_pnmc_lb=aug_mc_lb)
-    # print(f"Pruned reaction network with pnmc_lb={pnmc_lb}, rnmc_lb={rnmc_lb}, source_augmented_pnmc_lb={aug_mc_lb}, and default sources.")
-    # print(f"Number of nodes after pruning: {G.number_of_nodes()}, Number of edges: {G.number_of_edges()}")
-
+    G = ReactionNetwork.from_json('/home/stef/krxns/data/processed/known_reaction_network.json')
+    print("Full reaction network loaded from JSON.")
+    print(f"Number of nodes: {G.number_of_nodes()}, Number of edges: {G.number_of_edges()}")
+    sources = pd.read_csv('/home/stef/krxns/data/interim/default_sources.csv')['smiles'].tolist()
+    G.set_sources(smiles=sources)
+    rnmc_lb = 0.25
+    pnmc_lb = 0.25
+    aug_mc_lb = 0.8
+    G.prune(pnmc_lb=pnmc_lb, rnmc_lb=rnmc_lb, source_augmented_pnmc_lb=aug_mc_lb)
+    print(f"Pruned reaction network with pnmc_lb={pnmc_lb}, rnmc_lb={rnmc_lb}, source_augmented_pnmc_lb={aug_mc_lb}, and default sources.")
+    print(f"Number of nodes after pruning: {G.number_of_nodes()}, Number of edges: {G.number_of_edges()}")
 
     G = ReactionNetwork.from_json('/home/stef/krxns/data/processed/known_reaction_network.json')
     default_sources = pd.read_csv('/home/stef/krxns/data/interim/default_sources.csv')['smiles'].tolist()
@@ -596,12 +565,11 @@ if __name__ == '__main__':
     }
     sources = default_sources + list(addtl_sources.values())
     G.set_sources(smiles=sources)
-    # G.prune(pnmc_lb=pnmc_lb, rnmc_lb=rnmc_lb, source_augmented_pnmc_lb=aug_mc_lb)    
 
     targets = {'2-ethyl-2-hydroxy-3-oxobutanoate': 'CCC(O)(C(C)=O)C(=O)O'}
     target = G.get_nodes_by_prop('smiles', targets['2-ethyl-2-hydroxy-3-oxobutanoate'])[0]
     trees = G.enumerate_synthetic_trees(
-        target=1844,
+        target=target,
         max_depth=2,
         max_leaves=3,
         tot_rnmc_lb=0.1

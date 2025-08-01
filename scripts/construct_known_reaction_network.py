@@ -35,7 +35,7 @@ def main(cfg: DictConfig):
 
     G = ReactionNetwork()
     for _, row in tqdm(mapped_rxns.iterrows(), total=len(mapped_rxns), desc="Adding reactions to network"):
-        G.add_reaction(am_rxn=row['am_smarts'], rid=row['rxn_id'], smi2name=smi2name) # Append to network
+        G.add_reaction(am_rxn=row['am_smarts'], smi2name=smi2name) # Append to network
 
     G.to_json(Path(cfg.filepaths.processed_data) / "known_reaction_network.json") # Save
 
