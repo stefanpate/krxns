@@ -175,7 +175,7 @@ class ReactionNetwork(nx.MultiDiGraph):
                     rct_attrs['tot_rnmc'] = {}
                     self.add_node(rct_id, **rct_attrs)
                 
-                self.add_edge(
+                self.add_edge( # TODO: add way to check if edge already exists
                     rct_id,
                     pdt_id,
                     key=rid,
@@ -189,7 +189,7 @@ class ReactionNetwork(nx.MultiDiGraph):
             # Finally add grouped predecessors
             self.nodes[pdt_id]['grouped_predecessors'][rid] = grouped_predecessors
     
-    def set_sources(self, smiles: Iterable[str] = None, ids: Iterable[int] = None) -> None:
+    def set_sources(self, smiles: Iterable[str] = None, ids: Iterable[int] = None, quiet: bool = False) -> None:
         '''
         Sets the source compounds in the reaction network.
 
@@ -197,25 +197,32 @@ class ReactionNetwork(nx.MultiDiGraph):
         ----
         smiles: Iterable[str], optional
             An iterable of SMILES strings representing the source compounds.
-        indices: Iterable[int], optional
+        ids: Iterable[int], optional
             An iterable of node indices representing the source compounds.
+        quiet: bool, optional
+            If True, suppresses output messages.
         
         Raises
         ------
         ValueError
-            If neither `smiles` nor `indices` are provided.
+            If neither `smiles` nor `ids` are provided.
         '''
         if smiles is None and ids is None:
-            raise ValueError("Provide either smiles or indices to set sources.")
+            raise ValueError("Provide either smiles or node ids to set sources.")
         
         if smiles is not None:
             ids = [_id for smi in smiles for _id in self.get_nodes_by_prop('smiles', smi)]
         
+        ct = 0
         for _id in ids:
             if _id in self.nodes:
                 self.nodes[_id]['source'] = True
+                ct += 1
             else:
                 raise ValueError(f"Node id {_id} not found in the network.")
+            
+        if not quiet:
+            print(f"Set {ct} source compounds in the reaction network.")
    
     def prune(self, pnmc_lb: float, rnmc_lb: float, source_augmented_pnmc_lb: float) -> None:
         '''
@@ -267,7 +274,7 @@ class ReactionNetwork(nx.MultiDiGraph):
         self.remove_edges_from(to_remove) # Prune edges
         self.remove_nodes_from(list(nx.isolates(self))) # Prune disconnected nodes
     
-    def enumerate_synthetic_trees(self, target: str, max_depth: int, max_leaves: int, tot_rnmc_lb: float = 0.1) -> list[SyntheticTree]:
+    def enumerate_synthetic_trees(self, target: str, max_depth: int, max_leaves: int, tot_rnmc_lb: float = 0.1, quiet: bool = False) -> list[SyntheticTree]:
         '''
         Enumerates synthetic trees for a given target compound in a reaction network.
 
@@ -282,6 +289,8 @@ class ReactionNetwork(nx.MultiDiGraph):
         tot_rnmc_lb: float (optional)
             Lower bound on total fraction of mass from reactants transferred to a
             product (i.e., yield, atom economy).
+        quiet: bool (optional)
+            If True, suppresses output messages.
 
         Returns
         -------
@@ -292,8 +301,10 @@ class ReactionNetwork(nx.MultiDiGraph):
         tree = SyntheticTree(root=target)
         stack = deque()
         stack.append(tree)
+        ct = 1
         while stack:
             tree = stack.pop()
+            ct+=1
             
             if tree.n_gens > max_depth or tree.n_leaves > max_leaves: # Exclusion criteria
                 continue
@@ -318,8 +329,6 @@ class ReactionNetwork(nx.MultiDiGraph):
                     leaf_choices[leaf].append(rxn)
             
             # Make a choice for each leaf and stack new trees
-            # print(f"Generation: {tree.n_gens}")
-            # print({leaf[0]: len(choices) for leaf, choices in leaf_choices.items()}) # Debugging output
             choices = product(*leaf_choices.values())
             for choice in choices:
                 new_tree = tree.copy()
@@ -328,6 +337,9 @@ class ReactionNetwork(nx.MultiDiGraph):
                     new_tree.grow(leaf, rxn, rcts)
                 stack.append(new_tree)
 
+        if not quiet:
+            print(f"Considered {ct} trees, found {len(synthetic_trees)} synthetic trees.")
+        
         return synthetic_trees
                 
 def get_mass_contributions(am_rxn: str) -> dict[str, dict[int, dict[int, float]]]:
@@ -476,62 +488,7 @@ def de_am(am_rxn: str) -> tuple[str, str]:
        
 if __name__ == '__main__':
     import pandas as pd
-    nodes = [
-        (0, {'grouped_predecessors': {1: [1,], 2: [2,], 3: [3, 4]}, 'tot_rnmc': {1: 1.0, 2: 1.0, 3: 1.0}, 'source': False}),
-        (1, {'grouped_predecessors': {4: [5,], 5: [6, 7]}, 'tot_rnmc': {4: 1.0, 5: 1.0}, 'source': False}),
-        (2, {'grouped_predecessors': {}, 'tot_rnmc': {}, 'source': False}),
-        (3, {'grouped_predecessors': {6: [8, 9]}, 'tot_rnmc': {6: 0.8}, 'source': False}),
-        (4, {'grouped_predecessors': {7: [10,]}, 'tot_rnmc': {7: 1.0}, 'source': False}),
-        (5, {'grouped_predecessors': {}, 'tot_rnmc': {}, 'source': False}),
-        (6, {'grouped_predecessors': {}, 'tot_rnmc': {}, 'source': False}),
-        (7, {'grouped_predecessors': {8: [11,]}, 'tot_rnmc': {8: 0.9}, 'source': False}),
-        (8, {'grouped_predecessors': {9: [12,]}, 'tot_rnmc': {9: 1.0}, 'source': False}),
-        (9, {'grouped_predecessors': {10: [13,]}, 'tot_rnmc': {10: 0.95}, 'source': False}),
-        (10, {'grouped_predecessors': {}, 'tot_rnmc': {}, 'source': False}),
-        (11, {'grouped_predecessors': {}, 'tot_rnmc': {}, 'source': False}),
-        (12, {'grouped_predecessors': {11: [14,]}, 'tot_rnmc': {11: 0.85}, 'source': False}),
-        (13, {'grouped_predecessors': {}, 'tot_rnmc': {}, 'source': False}),
-        (14, {'grouped_predecessors': {}, 'tot_rnmc': {}, 'source': False}),
-    ]
-
-    edges = [
-        (1, 0, 1, {'pnmc': 1.0, 'rnmc': 1.0}),
-        (2, 0, 2, {'pnmc': 1.0, 'rnmc': 1.0}),
-        (3, 0, 3, {'pnmc': 1.0, 'rnmc': 1.0}),
-        (4, 0, 3, {'pnmc': 1.0, 'rnmc': 1.0}),
-        (5, 1, 4, {'pnmc': 1.0, 'rnmc': 1.0}),
-        (6, 1, 5, {'pnmc': 1.0, 'rnmc': 1.0}),
-        (7, 1, 5, {'pnmc': 1.0, 'rnmc': 1.0}),
-        (8, 3, 6, {'pnmc': 1.0, 'rnmc': 1.0}),
-        (9, 3, 6, {'pnmc': 1.0, 'rnmc': 1.0}),
-        (10, 4, 7, {'pnmc': 1.0, 'rnmc': 1.0}),
-        (11, 7, 8, {'pnmc': 1.0, 'rnmc': 1.0}),
-        (12, 8, 9, {'pnmc': 1.0, 'rnmc': 1.0}),
-        (13, 9, 10, {'pnmc': 1.0, 'rnmc': 1.0}),
-        (14, 12, 11, {'pnmc': 1.0, 'rnmc': 1.0}),
-
-    ]
-
-    target = 0
-    sources = {6, 10, 11, 13, 14}
-    max_leaves = 5
-    max_depth = 5
-    
-    G = ReactionNetwork()
-    G.add_nodes_from(nodes)
-    G.add_edges_from(edges)
-    G.set_sources(ids=sources)
-    G.prune(pnmc_lb=0.25, rnmc_lb=0.25, source_augmented_pnmc_lb=0.6)
-
-    synthetic_trees = G.enumerate_synthetic_trees(
-        target=target,
-        max_depth=max_depth,
-        max_leaves=max_leaves,
-        tot_rnmc_lb=0.1
-    )
-    print()
-
-
+  
     G = ReactionNetwork.from_json('/home/stef/krxns/data/processed/known_reaction_network.json')
     print("Full reaction network loaded from JSON.")
     print(f"Number of nodes: {G.number_of_nodes()}, Number of edges: {G.number_of_edges()}")
@@ -575,4 +532,3 @@ if __name__ == '__main__':
         tot_rnmc_lb=0.1
     )
     print(trees)
-    
