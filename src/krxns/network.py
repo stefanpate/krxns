@@ -10,6 +10,8 @@ from typing import Iterable
 import pathlib
 import json
 from ergochemics.standardize import hash_compound, hash_reaction
+import logging
+logger = logging.getLogger(__name__)
 
 @dataclass
 class SyntheticTree:
@@ -85,6 +87,7 @@ class SyntheticTree:
 class ReactionNetwork(nx.MultiDiGraph):
     def __init__(self, incoming_graph_data=None, multigraph_input=None, **attr):
         super().__init__(incoming_graph_data, multigraph_input, **attr)
+        self.logger = logging.getLogger(__name__)
 
     @classmethod
     def from_json(cls, fp: pathlib.Path | str) -> "ReactionNetwork":
@@ -222,7 +225,7 @@ class ReactionNetwork(nx.MultiDiGraph):
                 raise ValueError(f"Node id {_id} not found in the network.")
             
         if not quiet:
-            print(f"Set {ct} source compounds in the reaction network.")
+            self.logger.info(f"Set {ct} source compounds in the reaction network.")
    
     def prune(self, pnmc_lb: float, rnmc_lb: float, source_augmented_pnmc_lb: float) -> None:
         '''
@@ -338,7 +341,7 @@ class ReactionNetwork(nx.MultiDiGraph):
                 stack.append(new_tree)
 
         if not quiet:
-            print(f"Considered {ct} trees, found {len(synthetic_trees)} synthetic trees.")
+            self.logger.info(f"Considered {ct} trees, found {len(synthetic_trees)} synthetic trees.")
         
         return synthetic_trees
                 

@@ -111,14 +111,15 @@ hydra:
   overrides:
     hydra:
     - hydra.mode=RUN
-    task: []
+    task:
+    - expansion=2_steps_bottle_targets_25_to_None_rules_mechinferred_dt_01_rules_w_coreactants_co_metacyc_coreactants_sampled_False_pruned_False_aplusb_False
   job:
-    name: construct_known_reaction_network
+    name: retrosynthesis
     chdir: true
-    override_dirname: ''
+    override_dirname: expansion=2_steps_bottle_targets_25_to_None_rules_mechinferred_dt_01_rules_w_coreactants_co_metacyc_coreactants_sampled_False_pruned_False_aplusb_False
     id: ???
     num: ???
-    config_name: construct_known_reaction_network
+    config_name: retrosynthesis
     env_set: {}
     env_copy: []
     config:
@@ -142,7 +143,6 @@ hydra:
       provider: schema
     output_dir: /home/stef/krxns/data/processed
     choices:
-      sources: default
       filepaths: filepaths
       hydra/env: default
       hydra/callbacks: null

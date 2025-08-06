@@ -9,3 +9,4 @@ mlruns: ${.artifacts}/mlruns
 hpo_studies: ${.artifacts}/hpo_studies
 coreactants: ${.artifacts}/coreactants
 rules: ${.artifacts}/rules
+extracted_am_rxns: /home/stef/quest_data/bottle/results/extracted_am_rxns

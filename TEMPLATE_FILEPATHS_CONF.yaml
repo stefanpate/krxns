@@ -9,3 +9,4 @@ mlruns: ${.artifacts}/mlruns
 hpo_studies: ${.artifacts}/hpo_studies
 coreactants: ${.artifacts}/coreactants
 rules: ${.artifacts}/rules
+extracted_am_rxns: /store/extracted_am_rxns/here # TODO: Fill this in

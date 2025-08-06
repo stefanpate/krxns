@@ -1,0 +1,23 @@
+defaults:
+  - filepaths: filepaths
+  - _self_
+
+default_sources: ${filepaths.interim_data}/default_sources.csv
+sources: pred_kcs.txt
+targets: targets.txt
+am_rxns: am_rxns.parquet
+expansion: ???
+known_reaction_network: ${filepaths.processed_data}/known_reaction_network.json
+expansion_extract: ${filepaths.extracted_am_rxns}/${.expansion}
+max_depth: 2
+max_leaves: 3
+tot_rnmc_lb: 0.0
+
+hydra:
+  run:
+    dir: ${filepaths.processed_data}
+  job:
+    chdir: True
+  sweep:
+    dir: ${filepaths.processed_data}
+    subdir: .

@@ -1,12 +1,9 @@
 # Configs
 config.yaml
+configs/filepaths/filepaths.yaml
 
 # Large files
-data/sprhea_240310_v3_mapped.json
-artifacts/sim_mats/*
 
-# Slurm stuff
-**/slurm
 
 # Logs
 **/logs
