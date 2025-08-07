@@ -3,7 +3,7 @@ config.yaml
 configs/filepaths/filepaths.yaml
 
 # Large files
-
+data/processed/known_reaction_network.json
 
 # Logs
 **/logs
@@ -144,4 +144,3 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
-data/processed/known_reaction_network.json

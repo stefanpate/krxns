@@ -1,22 +1,23 @@
 source_names:
 - H2O
 - CoA
+- ATP
 - NADP(+)
 - NADPH
-- O2
-- ATP
 - NAD(+)
 - NADH
-- diphosphate
 - phosphate
 - ADP
-- CO2
+- diphosphate
+- O2
+- UDP
 - S-adenosyl-L-methionine
 - S-adenosyl-L-homocysteine
-- UDP
+- CO2
+- UDP-alpha-D-glucose
 - AMP
+- acetyl-CoA
 - NH4(+)
 - H2O2
-- UDP-alpha-D-glucose
 - hydrogen sulfide
 - methane
