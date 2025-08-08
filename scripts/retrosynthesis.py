@@ -57,7 +57,7 @@ def main(cfg: DictConfig):
         logger.info(f"Tree enumeration for target {tid} took {toc - tic:.2f} seconds.")
         target_to_trees[tid] = [
             [
-                {k: rxn_lookup[v] for k, v in gen.items()}
+                {k: rxn_lookup.get(v) for k, v in gen.items()}
                 for gen in tree.generations
             ]
             for tree in trees
