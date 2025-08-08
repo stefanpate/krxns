@@ -116,12 +116,12 @@ hydra:
     - max_leaves=3
     - expansion=3_steps_lbnl_targets_to_None_rules_mechinferred_dt_04_rules_w_coreactants_co_metacyc_coreactants_sampled_False_pruned_False_aplusb_False
   job:
-    name: retrosynthesis
+    name: construct_known_reaction_network
     chdir: true
     override_dirname: expansion=3_steps_lbnl_targets_to_None_rules_mechinferred_dt_04_rules_w_coreactants_co_metacyc_coreactants_sampled_False_pruned_False_aplusb_False,max_depth=5,max_leaves=3
     id: ???
     num: ???
-    config_name: retrosynthesis
+    config_name: construct_known_reaction_network
     env_set: {}
     env_copy: []
     config:
@@ -145,6 +145,7 @@ hydra:
       provider: schema
     output_dir: /home/spn1560/krxns/data/processed
     choices:
+      sources: default
       filepaths: filepaths
       hydra/env: default
       hydra/callbacks: null
